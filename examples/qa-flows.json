@@ -1,6 +1,4 @@
 {
-  "$schema": "https://trylayout.com/schemas/qa-flows.v1.json",
-  "docsUrl": "https://trylayout.com/docs/qa",
   "schemaVersion": 1,
   "flows": [
     {

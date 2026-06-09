@@ -5,7 +5,7 @@ import {LoadedQaFlow, QaFlowDefinition, QaFlowStep} from './types';
 export const DEFAULT_TEST_TIMEOUT_MS = 60 * 1000;
 export const SCREENSHOT_LIMIT_BYTES = 300 * 1024;
 export const FLOW_MANIFEST_PATH = '.layout/qa-flows.json';
-export const QA_DOCS_URL = 'https://trylayout.com/docs/qa';
+export const QA_DOCS_URL = 'https://github.com/Layout-App/layout-qa#readme';
 
 export function getTestTimeoutMs() {
   const value = Number(process.env.LAYOUT_QA_TEST_TIMEOUT_MS);
@@ -165,8 +165,6 @@ export async function loadFlow(input: {flowsPath: string; scenario: string}) {
 
 export function starterFlowManifest() {
   return {
-    $schema: 'https://trylayout.com/schemas/qa-flows.v1.json',
-    docsUrl: QA_DOCS_URL,
     schemaVersion: 1,
     flows: [
       {

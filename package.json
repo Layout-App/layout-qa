@@ -1,10 +1,10 @@
 {
   "name": "@trylayout/qa",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local browser QA runner and HTML reports for AI-built frontends.",
   "license": "MIT",
   "author": "Layout",
-  "homepage": "https://trylayout.com/docs/qa",
+  "homepage": "https://github.com/Layout-App/layout-qa#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Layout-App/layout-qa.git"
