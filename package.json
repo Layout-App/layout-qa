@@ -1,0 +1,49 @@
+{
+  "name": "@trylayout/qa",
+  "version": "0.1.0",
+  "description": "Local browser QA runner and HTML reports for AI-built frontends.",
+  "license": "MIT",
+  "author": "Layout",
+  "homepage": "https://trylayout.com/docs/qa",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Layout-App/layout-qa.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Layout-App/layout-qa/issues"
+  },
+  "keywords": [
+    "layout",
+    "qa",
+    "playwright",
+    "frontend",
+    "visual-testing",
+    "ai-agents"
+  ],
+  "bin": {
+    "trylayout": "build/cli/layoutQa.js"
+  },
+  "files": [
+    "build",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "playwright": "^1.60.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "typescript": "^5.9.3"
+  }
+}

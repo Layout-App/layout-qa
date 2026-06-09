@@ -1,0 +1,21 @@
+{
+  "$schema": "https://trylayout.com/schemas/qa-flows.v1.json",
+  "docsUrl": "https://trylayout.com/docs/qa",
+  "schemaVersion": 1,
+  "flows": [
+    {
+      "id": "smoke",
+      "name": "Smoke",
+      "startUrl": "/",
+      "scenarios": ["happy_path"],
+      "steps": [
+        {
+          "id": "initial_screen",
+          "type": "screenshot",
+          "label": "Initial screen",
+          "screenshot": true
+        }
+      ]
+    }
+  ]
+}
