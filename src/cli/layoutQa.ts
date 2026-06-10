@@ -11,7 +11,8 @@ import {
 } from '../flows';
 import {buildRunnerErrorResult, isQaRunPassed, runLayoutQaBrowser} from '../runner';
 import {openReport, writeArtifacts} from '../report';
-import {ArtifactSummary, QaTestRunResult} from '../types';
+import {ArtifactSummary, QaTestRunResult, QaViewport} from '../types';
+import {formatViewport, parseViewport} from '../viewports';
 
 type CliOptions = {
   command: string;
@@ -19,6 +20,7 @@ type CliOptions = {
   scenario: string;
   flowsPath: string;
   outDir: string;
+  viewport: QaViewport;
   timeoutMs?: number;
   headed: boolean;
   json: boolean;
@@ -46,6 +48,7 @@ Options:
   --scenario <name>      Mock scenario to activate. Defaults to happy_path.
   --flows <path>         Flow manifest path. Defaults to .layout/qa-flows.json.
   --out <path>           Artifact directory. Defaults to .layout/runs.
+  --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
   --timeout <ms>         Browser run timeout. Defaults to LAYOUT_QA_TEST_TIMEOUT_MS or 60000.
   --headed               Show the browser instead of running headless.
   --open                 Open the generated local HTML report after the run.
@@ -83,6 +86,7 @@ function parseArgs(args: string[]): CliOptions {
     scenario: readFlag(args, '--scenario') || 'happy_path',
     flowsPath: readFlag(args, '--flows'),
     outDir: readFlag(args, '--out'),
+    viewport: parseViewport(readFlag(args, '--viewport')),
     timeoutMs: parsedTimeoutMs,
     headed: hasFlag(args, '--headed'),
     json: hasFlag(args, '--json'),
@@ -135,6 +139,11 @@ function printHumanSummary(input: {
     `\nLayout QA ${passed ? 'passed' : 'failed'}\n` +
       `Scenario: ${input.scenario}\n` +
       `Target: ${input.targetUrl}\n` +
+      `Viewport: ${
+        input.result.viewport
+          ? formatViewport(input.result.viewport)
+          : 'unavailable'
+      }\n` +
       `Final URL: ${input.result.finalUrl || 'unavailable'}\n` +
       `Flow: ${input.result.flow?.name || 'None'} (${
         input.result.flow?.source || 'none'
@@ -215,10 +224,11 @@ async function runCommand(options: CliOptions) {
       flow,
       timeoutMs: options.timeoutMs || getTestTimeoutMs(),
       headless: !options.headed,
+      viewport: options.viewport,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    result = buildRunnerErrorResult(message);
+    result = buildRunnerErrorResult(message, options.viewport);
   }
 
   const artifacts = await writeArtifacts({
@@ -238,6 +248,7 @@ async function runCommand(options: CliOptions) {
           status: passed ? 'passed' : 'failed',
           scenario: options.scenario,
           targetUrl: options.targetUrl,
+          viewport: options.viewport,
           manifestPath,
           manifestFound,
           artifacts,

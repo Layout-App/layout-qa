@@ -9,6 +9,7 @@ import {
   QaTestRunIssue,
   QaTestRunNextAction,
   QaTestRunResult,
+  QaViewport,
 } from './types';
 import {
   DEFAULT_TEST_TIMEOUT_MS,
@@ -16,6 +17,7 @@ import {
   QA_DOCS_URL,
   SCREENSHOT_LIMIT_BYTES,
 } from './flows';
+import {DEFAULT_VIEWPORT, formatViewport} from './viewports';
 
 function truncate(value: string, maxLength = 1000) {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength)}...`;
@@ -275,6 +277,232 @@ function requireStepValue(value: string | undefined, field: string) {
   return value;
 }
 
+function stepLocator(
+  page: Page,
+  step: QaFlowStep,
+  exact: boolean,
+  requiredField: string
+) {
+  if (step.selector) {
+    return page.locator(step.selector).first();
+  }
+
+  const text = requireStepValue(step.text, requiredField);
+  return page.getByText(text, {exact}).first();
+}
+
+function formatBox(box: {x: number; y: number; width: number; height: number}) {
+  return `${Math.round(box.width)}x${Math.round(box.height)} at ${Math.round(
+    box.x
+  )},${Math.round(box.y)}`;
+}
+
+async function assertNoHorizontalOverflow(page: Page, tolerance = 1) {
+  const result = (await page.evaluate(checkTolerance => {
+    function elementLabel(element: Element) {
+      const tagName = element.tagName.toLowerCase();
+      const testId =
+        element.getAttribute('data-testid') ||
+        element.getAttribute('data-qa') ||
+        '';
+      if (testId) return `${tagName}[data-qa/testid="${testId}"]`;
+      if (element.id) return `${tagName}#${element.id}`;
+      const className = Array.from(element.classList).slice(0, 3).join('.');
+      return className ? `${tagName}.${className}` : tagName;
+    }
+
+    const root = document.documentElement;
+    const body = document.body;
+    const viewportWidth = window.innerWidth;
+    const scrollWidth = Math.max(root?.scrollWidth || 0, body?.scrollWidth || 0);
+    const overflowPx = Math.max(0, scrollWidth - viewportWidth);
+    const offenders = Array.from(document.body?.querySelectorAll('*') || [])
+      .map(element => {
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+
+        const rightOverflow = Math.max(0, rect.right - viewportWidth);
+        const leftOverflow = Math.max(0, -rect.left);
+        const elementOverflowPx = Math.max(rightOverflow, leftOverflow);
+        if (elementOverflowPx <= checkTolerance) return null;
+
+        return {
+          label: elementLabel(element),
+          x: Math.round(rect.x),
+          width: Math.round(rect.width),
+          right: Math.round(rect.right),
+          overflowPx: Math.round(elementOverflowPx),
+        };
+      })
+      .filter(
+        (
+          entry
+        ): entry is {
+          label: string;
+          x: number;
+          width: number;
+          right: number;
+          overflowPx: number;
+        } => Boolean(entry)
+      )
+      .sort((a, b) => b.overflowPx - a.overflowPx)
+      .slice(0, 5);
+
+    return {
+      viewportWidth,
+      scrollWidth,
+      overflowPx,
+      offenders,
+    };
+  }, tolerance)) as {
+    viewportWidth: number;
+    scrollWidth: number;
+    overflowPx: number;
+    offenders: {
+      label: string;
+      x: number;
+      width: number;
+      right: number;
+      overflowPx: number;
+    }[];
+  };
+
+  if (result.overflowPx > tolerance) {
+    const offenderDetail = result.offenders.length
+      ? ` Offenders: ${result.offenders
+          .map(
+            offender =>
+              `${offender.label} overflowed ${offender.overflowPx}px (x=${offender.x}, width=${offender.width}, right=${offender.right})`
+          )
+          .join('; ')}.`
+      : '';
+    throw new Error(
+      `Horizontal overflow detected: document width ${result.scrollWidth}px exceeds viewport ${result.viewportWidth}px by ${result.overflowPx}px.${offenderDetail}`
+    );
+  }
+
+  return `No horizontal overflow: document width ${result.scrollWidth}px, viewport ${result.viewportWidth}px.`;
+}
+
+async function assertElementInViewport(input: {
+  page: Page;
+  step: QaFlowStep;
+  exact: boolean;
+  timeoutMs: number;
+}) {
+  const locator = stepLocator(
+    input.page,
+    input.step,
+    input.exact,
+    'selector or text'
+  );
+  await locator.waitFor({state: 'visible', timeout: input.timeoutMs});
+
+  const box = await locator.boundingBox();
+  if (!box || box.width <= 0 || box.height <= 0) {
+    throw new Error('Expected element to have a visible nonzero layout box.');
+  }
+
+  const viewport = input.page.viewportSize();
+  if (!viewport) {
+    throw new Error('Could not read the current browser viewport size.');
+  }
+
+  const tolerance = input.step.tolerance ?? 1;
+  const right = box.x + box.width;
+  const bottom = box.y + box.height;
+  const visibleWidth = Math.min(right, viewport.width) - Math.max(box.x, 0);
+  const visibleHeight = Math.min(bottom, viewport.height) - Math.max(box.y, 0);
+
+  if (visibleWidth <= tolerance || visibleHeight <= tolerance) {
+    throw new Error(
+      `Expected element to intersect viewport ${viewport.width}x${viewport.height}, got box ${formatBox(
+        box
+      )}.`
+    );
+  }
+
+  return `Element intersects viewport ${viewport.width}x${viewport.height}: ${formatBox(
+    box
+  )}.`;
+}
+
+function definedBoxConstraints(step: QaFlowStep) {
+  return [
+    ['minWidth', step.minWidth],
+    ['maxWidth', step.maxWidth],
+    ['minHeight', step.minHeight],
+    ['maxHeight', step.maxHeight],
+  ] as const;
+}
+
+async function assertElementBox(input: {
+  page: Page;
+  step: QaFlowStep;
+  exact: boolean;
+  timeoutMs: number;
+}) {
+  const constraints = definedBoxConstraints(input.step).filter(
+    ([, value]) => value !== undefined
+  );
+  if (constraints.length === 0) {
+    throw new Error(
+      'assert_box requires at least one of minWidth, maxWidth, minHeight, or maxHeight.'
+    );
+  }
+
+  const locator = stepLocator(
+    input.page,
+    input.step,
+    input.exact,
+    'selector or text'
+  );
+  await locator.waitFor({state: 'visible', timeout: input.timeoutMs});
+
+  const box = await locator.boundingBox();
+  if (!box || box.width <= 0 || box.height <= 0) {
+    throw new Error('Expected element to have a visible nonzero layout box.');
+  }
+
+  const failures: string[] = [];
+  if (input.step.minWidth !== undefined && box.width < input.step.minWidth) {
+    failures.push(
+      `width ${Math.round(box.width)}px is below minWidth ${
+        input.step.minWidth
+      }px`
+    );
+  }
+  if (input.step.maxWidth !== undefined && box.width > input.step.maxWidth) {
+    failures.push(
+      `width ${Math.round(box.width)}px is above maxWidth ${
+        input.step.maxWidth
+      }px`
+    );
+  }
+  if (input.step.minHeight !== undefined && box.height < input.step.minHeight) {
+    failures.push(
+      `height ${Math.round(box.height)}px is below minHeight ${
+        input.step.minHeight
+      }px`
+    );
+  }
+  if (input.step.maxHeight !== undefined && box.height > input.step.maxHeight) {
+    failures.push(
+      `height ${Math.round(box.height)}px is above maxHeight ${
+        input.step.maxHeight
+      }px`
+    );
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      `Element box ${formatBox(box)} failed constraints: ${failures.join('; ')}.`
+    );
+  }
+
+  return `Element box matched constraints: ${formatBox(box)}.`;
+}
+
 async function caseSensitiveGoto(
   page: Page,
   targetUrl: string,
@@ -358,6 +586,28 @@ async function executeFlowStep(input: {
     return `URL matched: ${currentUrl}`;
   }
 
+  if (input.step.type === 'assert_no_horizontal_overflow') {
+    return assertNoHorizontalOverflow(input.page, input.step.tolerance ?? 1);
+  }
+
+  if (input.step.type === 'assert_in_viewport') {
+    return assertElementInViewport({
+      page: input.page,
+      step: input.step,
+      exact,
+      timeoutMs: stepTimeout,
+    });
+  }
+
+  if (input.step.type === 'assert_box') {
+    return assertElementBox({
+      page: input.page,
+      step: input.step,
+      exact,
+      timeoutMs: stepTimeout,
+    });
+  }
+
   if (input.step.type === 'screenshot') {
     return 'Captured screenshot checkpoint.';
   }
@@ -435,8 +685,10 @@ export async function runLayoutQaBrowser(input: {
   flow: LoadedQaFlow;
   timeoutMs?: number;
   headless?: boolean;
+  viewport?: QaViewport;
 }) {
   const timeoutMs = input.timeoutMs || DEFAULT_TEST_TIMEOUT_MS;
+  const viewport = input.viewport || DEFAULT_VIEWPORT;
   const issues: QaTestRunIssue[] = [];
   const {chromium} = await import('playwright');
   const browser = await chromium.launch({headless: input.headless !== false});
@@ -444,7 +696,7 @@ export async function runLayoutQaBrowser(input: {
   try {
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
-      viewport: {width: 1280, height: 900},
+      viewport: {width: viewport.width, height: viewport.height},
     });
     await context.addInitScript({
       content: `
@@ -559,6 +811,7 @@ export async function runLayoutQaBrowser(input: {
       screenshotDataUrl,
       screenshotBytes: screenshot.byteLength,
       bodyTextSample: pageState.bodyTextSample,
+      viewport,
       checks,
       issues: issues.slice(0, 20),
       flow: flowResult,
@@ -579,8 +832,12 @@ export async function runLayoutQaBrowser(input: {
   }
 }
 
-export function buildRunnerErrorResult(message: string): QaTestRunResult {
+export function buildRunnerErrorResult(
+  message: string,
+  viewport: QaViewport = DEFAULT_VIEWPORT
+): QaTestRunResult {
   return {
+    viewport,
     checks: [
       {
         id: 'runner_error',
@@ -604,6 +861,7 @@ export function buildRunnerErrorResult(message: string): QaTestRunResult {
         'Confirm the target URL is reachable by the runner.',
         'Confirm the app is served with the Layout mock env flag enabled.',
         'Retry after the target loads consistently in a browser.',
+        `Viewport used for this run: ${formatViewport(viewport)}.`,
       ],
     },
   };

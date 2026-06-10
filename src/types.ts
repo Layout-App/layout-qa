@@ -37,6 +37,12 @@ export type QaTestRunFlowStepResult = {
   screenshotBytes?: number;
 };
 
+export type QaViewport = {
+  id: string;
+  width: number;
+  height: number;
+};
+
 export type QaTestRunFlowResult = {
   id: string;
   name: string;
@@ -52,6 +58,7 @@ export type QaTestRunResult = {
   screenshotDataUrl?: string;
   screenshotBytes?: number;
   bodyTextSample?: string;
+  viewport?: QaViewport;
   checks: QaTestRunCheck[];
   issues: QaTestRunIssue[];
   flow?: QaTestRunFlowResult;
@@ -70,6 +77,11 @@ export type QaFlowStep = {
   exact?: boolean;
   screenshot?: boolean;
   timeoutMs?: number;
+  tolerance?: number;
+  minWidth?: number;
+  maxWidth?: number;
+  minHeight?: number;
+  maxHeight?: number;
 };
 
 export type QaFlowDefinition = {

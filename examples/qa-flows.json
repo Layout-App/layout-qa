@@ -12,6 +12,15 @@
           "type": "screenshot",
           "label": "Initial screen",
           "screenshot": true
+        },
+        {
+          "id": "no_horizontal_overflow",
+          "type": "assert_no_horizontal_overflow"
+        },
+        {
+          "id": "main_in_viewport",
+          "type": "assert_in_viewport",
+          "selector": "main"
         }
       ]
     }

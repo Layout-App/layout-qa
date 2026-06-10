@@ -8,6 +8,7 @@ import {
   QaTestRunResult,
 } from './types';
 import {isQaRunPassed} from './runner';
+import {formatViewport} from './viewports';
 
 export function safeName(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
@@ -157,6 +158,7 @@ function renderReport(input: {
     : '';
   const resultHref = relativeHref(input.runDir, input.resultPath);
   const flow = input.result.flow;
+  const viewport = input.result.viewport;
   const failedCheckCount = input.result.checks.filter(
     check => !check.passed
   ).length;
@@ -201,7 +203,7 @@ function renderReport(input: {
     section { margin-top: 28px; }
     a { color: inherit; }
     .eyebrow { color: var(--muted); font-size: .78rem; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
-    .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
+    .summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
     .metric, .panel, .step, .issue {
       border: 1px solid var(--line);
       background: var(--panel);
@@ -274,6 +276,9 @@ function renderReport(input: {
       <div class="metric"><dt>Target URL</dt><dd>${escapeHtml(
         input.targetUrl
       )}</dd></div>
+      <div class="metric"><dt>Viewport</dt><dd>${escapeHtml(
+        viewport ? formatViewport(viewport) : 'unavailable'
+      )}</dd></div>
       <div class="metric"><dt>Final URL</dt><dd>${escapeHtml(
         input.result.finalUrl || 'unavailable'
       )}</dd></div>
@@ -340,7 +345,11 @@ export async function writeArtifacts(input: {
     ? path.resolve(process.cwd(), input.outDir)
     : await resolveDefaultPath('.layout/runs');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const runDir = path.join(outRoot, `${stamp}-${safeName(input.scenario)}`);
+  const viewportId = input.result.viewport?.id || 'viewport_unknown';
+  const runDir = path.join(
+    outRoot,
+    `${stamp}-${safeName(input.scenario)}-${safeName(viewportId)}`
+  );
   const screenshotsDir = path.join(runDir, 'screenshots');
   await fs.mkdir(screenshotsDir, {recursive: true});
 

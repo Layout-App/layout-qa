@@ -1,6 +1,6 @@
 {
   "name": "@trylayout/qa",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Local browser QA runner and HTML reports for AI-built frontends.",
   "license": "MIT",
   "author": "Layout",
@@ -38,6 +38,7 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
+    "publish:alias": "cd packages/layout-qa && npm publish --access public",
     "prepack": "npm run build"
   },
   "dependencies": {

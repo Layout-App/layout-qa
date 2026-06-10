@@ -55,6 +55,11 @@ function normalizeFlowStep(value: unknown, index: number): QaFlowStep | null {
     exact: booleanValue(value.exact),
     screenshot: booleanValue(value.screenshot, type === 'screenshot'),
     timeoutMs: numberValue(value.timeoutMs),
+    tolerance: numberValue(value.tolerance),
+    minWidth: numberValue(value.minWidth),
+    maxWidth: numberValue(value.maxWidth),
+    minHeight: numberValue(value.minHeight),
+    maxHeight: numberValue(value.maxHeight),
   };
 }
 

@@ -7,6 +7,7 @@ The core loop is intentionally local:
 ```bash
 npx @trylayout/qa init
 npx @trylayout/qa run --target-url http://localhost:5173 --scenario happy_path --open
+npx @trylayout/qa run --target-url http://localhost:5173 --scenario happy_path --viewport 390x844 --open
 ```
 
 No account, upload, hosted service, or external docs are required.
@@ -88,7 +89,7 @@ npx @trylayout/qa run \
 Each run writes:
 
 ```text
-.layout/runs/<timestamp-scenario>/
+.layout/runs/<timestamp-scenario-viewport>/
   index.html
   result.json
   screenshots/
@@ -113,6 +114,7 @@ Options:
 --scenario <name>      Mock scenario to activate. Defaults to happy_path.
 --flows <path>         Flow manifest path. Defaults to .layout/qa-flows.json.
 --out <path>           Artifact directory. Defaults to .layout/runs.
+--viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
 --timeout <ms>         Browser run timeout. Defaults to 60000.
 --headed               Show the browser instead of running headless.
 --open                 Open the generated local HTML report after the run.
@@ -172,6 +174,8 @@ Step fields:
 - `label`: optional human-readable report label.
 - `screenshot`: set `true` to capture a screenshot after the step.
 - `timeoutMs`: optional per-step timeout.
+- `tolerance`: optional pixel tolerance for layout assertions.
+- `minWidth`, `maxWidth`, `minHeight`, `maxHeight`: optional `assert_box` constraints.
 
 Supported step types:
 
@@ -181,6 +185,9 @@ Supported step types:
 - `assert_visible_text`: require visible `text`.
 - `wait_for_text`: alias for a visible text wait.
 - `assert_url`: require current URL to equal `url` or contain `contains`.
+- `assert_no_horizontal_overflow`: require the page not to overflow the viewport horizontally.
+- `assert_in_viewport`: require a `selector` or visible `text` to have a nonzero box intersecting the viewport.
+- `assert_box`: require a `selector` or visible `text` to satisfy width/height constraints.
 - `screenshot`: capture a screenshot checkpoint.
 
 Examples:
@@ -196,6 +203,43 @@ Examples:
 ```json
 { "id": "settings_url", "type": "assert_url", "contains": "/settings" }
 ```
+
+```json
+{ "id": "no_overflow", "type": "assert_no_horizontal_overflow" }
+```
+
+```json
+{ "id": "main_visible", "type": "assert_in_viewport", "selector": "main" }
+```
+
+```json
+{
+  "id": "primary_cta_size",
+  "type": "assert_box",
+  "selector": "[data-qa='primary-cta']",
+  "minWidth": 120,
+  "maxHeight": 56
+}
+```
+
+## Viewports
+
+The runner defaults to the desktop viewport, `1280x900`. Use `--viewport` to run the same flow at a preset or exact size:
+
+```bash
+npx @trylayout/qa run --target-url http://localhost:5173 --viewport desktop
+npx @trylayout/qa run --target-url http://localhost:5173 --viewport tablet
+npx @trylayout/qa run --target-url http://localhost:5173 --viewport mobile
+npx @trylayout/qa run --target-url http://localhost:5173 --viewport 390x844
+```
+
+Presets:
+
+- `desktop`: `1280x900`
+- `tablet`: `768x1024`
+- `mobile`: `390x844`
+
+The selected viewport is written to `result.json`, shown in the HTML report, and included in the run directory name.
 
 ## Mock Scenarios
 
@@ -281,6 +325,8 @@ This package is intentionally small:
 - It does run Playwright against an already-running frontend.
 - It does write local screenshots and an HTML report.
 - It does support deterministic scenario switching.
+- It does support explicit viewport sizing.
+- It does support lightweight layout assertions.
 - It does not build or host your app.
 - It does not upload results.
 - It does not perform AI review by itself.
