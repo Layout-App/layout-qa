@@ -1,0 +1,41 @@
+{
+  "name": "layout-qa",
+  "version": "0.1.2",
+  "description": "Convenience alias for @trylayout/qa.",
+  "license": "MIT",
+  "author": "Layout",
+  "homepage": "https://github.com/Layout-App/layout-qa#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Layout-App/layout-qa.git",
+    "directory": "packages/layout-qa"
+  },
+  "bugs": {
+    "url": "https://github.com/Layout-App/layout-qa/issues"
+  },
+  "keywords": [
+    "layout",
+    "qa",
+    "playwright",
+    "frontend",
+    "visual-testing",
+    "ai-agents"
+  ],
+  "bin": {
+    "layout-qa": "index.js",
+    "trylayout": "index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@trylayout/qa": "^0.1.2"
+  }
+}

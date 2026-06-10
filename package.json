@@ -1,6 +1,6 @@
 {
   "name": "@trylayout/qa",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local browser QA runner and HTML reports for AI-built frontends.",
   "license": "MIT",
   "author": "Layout",
@@ -21,6 +21,7 @@
     "ai-agents"
   ],
   "bin": {
+    "layout-qa": "build/cli/layoutQa.js",
     "trylayout": "build/cli/layoutQa.js"
   },
   "files": [

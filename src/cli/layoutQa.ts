@@ -33,7 +33,9 @@ function printHelp() {
 Usage:
   trylayout init [options]
   trylayout run --target-url <url> [options]
+  layout-qa run --target-url <url> [options]
   npx @trylayout/qa run --target-url <url> [options]
+  npx layout-qa run --target-url <url> [options]
 
 Commands:
   init                  Write a starter .layout/qa-flows.json.

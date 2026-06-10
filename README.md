@@ -11,6 +11,19 @@ npx @trylayout/qa run --target-url http://localhost:5173 --scenario happy_path -
 
 No account, upload, hosted service, or external docs are required.
 
+Package names:
+
+- Canonical npm package: `@trylayout/qa`
+- Convenience npm alias: `layout-qa`
+- CLI binaries: `trylayout` and `layout-qa`
+
+These commands are equivalent:
+
+```bash
+npx @trylayout/qa run --target-url http://localhost:5173 --scenario happy_path --open
+npx layout-qa run --target-url http://localhost:5173 --scenario happy_path --open
+```
+
 ## Why This Exists
 
 Frontend agents can move faster when they have a visual feedback loop they can run themselves. Layout gives the agent a small protocol:
@@ -28,6 +41,12 @@ Use it directly with `npx`:
 
 ```bash
 npx @trylayout/qa run --target-url http://localhost:5173
+```
+
+The package is also available under the unscoped alias `layout-qa` for agents and tools that infer the package name from this repository:
+
+```bash
+npx layout-qa run --target-url http://localhost:5173
 ```
 
 Or install it in a project:
@@ -84,6 +103,7 @@ The process exits `0` on pass and `1` on failure, so the same command can run in
 ```text
 trylayout init [options]
 trylayout run --target-url <url> [options]
+layout-qa run --target-url <url> [options]
 ```
 
 Options:
