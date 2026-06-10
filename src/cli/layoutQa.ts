@@ -45,7 +45,7 @@ Commands:
 
 Options:
   --target-url <url>     URL of the running frontend to test.
-  --scenario <name>      Mock scenario to activate. Defaults to happy_path.
+  --scenario <name>      Scenario to activate. Defaults to happy_path.
   --flows <path>         Flow manifest path. Defaults to .layout/qa-flows.json.
   --out <path>           Artifact directory. Defaults to .layout/runs.
   --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.

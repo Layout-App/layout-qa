@@ -1,5 +1,9 @@
 # Layout QA
 
+[![npm](https://img.shields.io/npm/v/@trylayout/qa?label=npm)](https://www.npmjs.com/package/@trylayout/qa)
+[![CI](https://github.com/Layout-App/layout-qa/actions/workflows/ci.yml/badge.svg)](https://github.com/Layout-App/layout-qa/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-black.svg)](LICENSE)
+
 Layout QA is a local browser QA protocol and runner for AI-built frontends. It runs deterministic flows against a local or preview URL, captures screenshots at meaningful checkpoints, checks browser health, and writes a static HTML report.
 
 The core loop is intentionally local:
@@ -11,6 +15,10 @@ npx @trylayout/qa run --target-url http://localhost:5173 --scenario happy_path -
 ```
 
 No account, upload, hosted service, or external docs are required.
+
+## Example Report
+
+![Layout QA HTML report for a synthetic CRM demo](docs/assets/layout-qa-report.png)
 
 Package names:
 
@@ -29,8 +37,8 @@ npx layout-qa run --target-url http://localhost:5173 --scenario happy_path --ope
 
 Frontend agents can move faster when they have a visual feedback loop they can run themselves. Layout gives the agent a small protocol:
 
-- Wire deterministic API/auth mocks behind a local env flag such as `VITE_LAYOUT_QA_MOCKS=1`.
-- Switch mock states with `localStorage["layout.qa.scenario"]`.
+- Wire deterministic API/auth responses behind a local env flag such as `VITE_LAYOUT_QA_MOCKS=1`.
+- Switch response states with `localStorage["layout.qa.scenario"]`.
 - Declare high-value browser flows in `.layout/qa-flows.json`.
 - Run the CLI locally and inspect the generated screenshots/report.
 
@@ -71,7 +79,7 @@ Create a starter flow manifest:
 npx @trylayout/qa init
 ```
 
-Start your app with whatever mock flag your project uses:
+Start your app with whatever local QA flag your project uses:
 
 ```bash
 VITE_LAYOUT_QA_MOCKS=1 npm run dev
@@ -111,7 +119,7 @@ Options:
 
 ```text
 --target-url <url>     URL of the running frontend to test.
---scenario <name>      Mock scenario to activate. Defaults to happy_path.
+--scenario <name>      Scenario to activate. Defaults to happy_path.
 --flows <path>         Flow manifest path. Defaults to .layout/qa-flows.json.
 --out <path>           Artifact directory. Defaults to .layout/runs.
 --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
@@ -241,7 +249,7 @@ Presets:
 
 The selected viewport is written to `result.json`, shown in the HTML report, and included in the run directory name.
 
-## Mock Scenarios
+## Scenarios
 
 Before the app loads, the runner sets:
 
@@ -250,7 +258,7 @@ localStorage.setItem("layout.qa.scenario", "<scenario>");
 sessionStorage.setItem("layout.qa.runner", "1");
 ```
 
-Your app can use `layout.qa.scenario` to switch deterministic mock states:
+Your app can use `layout.qa.scenario` to switch deterministic API/auth response states:
 
 - `happy_path`: normal populated data.
 - `empty`: successful responses with empty states.
@@ -271,14 +279,14 @@ Create a local-only browser QA loop that an agent can run while changing fronten
 Rules:
 - Do not add a standalone mock server.
 - Do not require a hosted Layout service.
-- Keep all mock data local to this app.
-- Gate mocks behind a local-only env flag such as VITE_LAYOUT_QA_MOCKS=1, NEXT_PUBLIC_LAYOUT_QA_MOCKS=1, or the framework-appropriate equivalent.
-- Use localStorage["layout.qa.scenario"] to select at least happy_path, empty, and error mock states.
+- Keep all deterministic response fixtures local to this app.
+- Gate deterministic API/auth responses behind a local-only env flag such as VITE_LAYOUT_QA_MOCKS=1, NEXT_PUBLIC_LAYOUT_QA_MOCKS=1, or the framework-appropriate equivalent.
+- Use localStorage["layout.qa.scenario"] to select at least happy_path, empty, and error response states.
 - Hide any local QA switcher or debug controls when sessionStorage["layout.qa.runner"] === "1".
 
 Implementation:
 - Add deterministic API fixtures for the highest-value frontend route.
-- If the app has a central auth/session abstraction, add a deterministic mock user only when the Layout QA env flag is enabled.
+- If the app has a central auth/session abstraction, add a deterministic QA user only when the Layout QA env flag is enabled.
 - If auth is scattered or provider-SDK-only, leave a clear note in the PR/code comments and start with public or logged-out flows.
 - Add .layout/qa-flows.json with one smoke flow for the most important page.
 - Prefer visible text and stable selectors.
@@ -332,3 +340,7 @@ This package is intentionally small:
 - It does not perform AI review by itself.
 
 Those hosted/reporting layers can be added later without changing the local protocol.
+
+## Feedback
+
+Issues and examples are welcome in [GitHub Issues](https://github.com/Layout-App/layout-qa/issues). You can also reach me on X at [@tscepo](https://x.com/tscepo).

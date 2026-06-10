@@ -68,7 +68,7 @@ function renderCheckList(result: QaTestRunResult) {
     .map(
       check => `<li class="row">
         <span class="status ${check.passed ? 'passed' : 'failed'}">${
-        check.passed ? 'PASS' : 'FAIL'
+        check.passed ? 'Pass' : 'Fail'
       }</span>
         <div>
           <p class="row-title">${escapeHtml(check.label)}</p>
@@ -174,81 +174,149 @@ function renderReport(input: {
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f7f2;
-      --panel: #fffdf8;
-      --line: #e4e1d8;
-      --text: #1b1a17;
-      --muted: #65635d;
-      --green: #2f7a45;
-      --green-bg: #e6f4ea;
-      --red: #9b2c2c;
-      --red-bg: #fff0f0;
-      --amber: #7a5c14;
-      --amber-bg: #fff5d6;
+      --bg: #ffffff;
+      --surface: #f5f5f7;
+      --surface-strong: #fbfbfd;
+      --line: #d2d2d7;
+      --line-soft: #e8e8ed;
+      --text: #1d1d1f;
+      --muted: #6e6e73;
+      --blue: #06c;
+      --green: #248a3d;
+      --red: #d70015;
+      --amber: #b25000;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.5;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      line-height: 1.47059;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
-    main { max-width: 1120px; margin: 0 auto; padding: 32px 24px 56px; }
-    header.page { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; border-bottom: 1px solid var(--line); padding-bottom: 24px; }
+    main { max-width: 1180px; margin: 0 auto; padding: 56px 28px 72px; }
+    header.page {
+      display: flex;
+      justify-content: space-between;
+      gap: 32px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line-soft);
+      padding-bottom: 36px;
+    }
     h1, h2, h3, p { margin: 0; }
-    h1 { font-size: clamp(2rem, 5vw, 4rem); line-height: 1; font-weight: 600; letter-spacing: 0; }
-    h2 { font-size: 1rem; font-weight: 650; margin-bottom: 12px; }
-    h3 { font-size: 1rem; font-weight: 650; }
-    section { margin-top: 28px; }
-    a { color: inherit; }
-    .eyebrow { color: var(--muted); font-size: .78rem; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
-    .summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
-    .metric, .panel, .step, .issue {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 8px;
+    h1 {
+      font-size: clamp(2.75rem, 7vw, 5.5rem);
+      line-height: .95;
+      font-weight: 500;
+      letter-spacing: 0;
     }
-    .metric { padding: 14px; min-width: 0; }
-    .metric dt { color: var(--muted); font-size: .82rem; }
-    .metric dd { margin: 4px 0 0; font-weight: 650; overflow-wrap: anywhere; }
-    .panel { padding: 16px; }
-    .stack { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
-    .row { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+    h2 { font-size: 1.375rem; line-height: 1.2; font-weight: 500; margin-bottom: 18px; }
+    h3 { font-size: 1.0625rem; line-height: 1.25; font-weight: 500; }
+    section { margin-top: 42px; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .eyebrow {
+      color: var(--muted);
+      font-size: .8125rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin-bottom: 10px;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 1px;
+      margin-top: 32px;
+      border: 1px solid var(--line-soft);
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--line-soft);
+    }
+    .metric, .panel, .step, .issue {
+      background: var(--surface-strong);
+    }
+    .metric { padding: 18px 20px; min-width: 0; }
+    .metric dt { color: var(--muted); font-size: .8125rem; }
+    .metric dd { margin: 5px 0 0; font-weight: 500; overflow-wrap: anywhere; }
+    .panel {
+      padding: 22px;
+      border: 1px solid var(--line-soft);
+      border-radius: 14px;
+    }
+    .stack { display: grid; gap: 0; list-style: none; margin: 0; padding: 0; }
+    .row {
+      display: grid;
+      grid-template-columns: 64px minmax(0, 1fr);
+      gap: 16px;
+      padding: 14px 0;
+      border-top: 1px solid var(--line-soft);
+    }
     .row:first-child { border-top: 0; padding-top: 0; }
     .row:last-child { padding-bottom: 0; }
-    .row-title { font-weight: 650; overflow-wrap: anywhere; }
-    .muted { color: var(--muted); font-size: .92rem; overflow-wrap: anywhere; }
-    .detail { margin-top: 8px; color: #3f3d38; overflow-wrap: anywhere; }
+    .row-title { font-weight: 500; overflow-wrap: anywhere; }
+    .muted { color: var(--muted); font-size: .9375rem; overflow-wrap: anywhere; }
+    .detail { margin-top: 10px; color: #424245; overflow-wrap: anywhere; }
     .break { word-break: break-all; }
-    .status { font-size: .78rem; font-weight: 750; padding-top: 2px; }
+    .status { font-size: .8125rem; font-weight: 500; padding-top: 2px; }
     .status.passed { color: var(--green); }
     .status.failed { color: var(--red); }
     .badge {
       display: inline-flex;
       align-items: center;
-      border-radius: 6px;
-      border: 1px solid var(--line);
-      padding: 4px 8px;
-      font-size: .82rem;
-      font-weight: 650;
+      border-radius: 999px;
+      border: 1px solid var(--line-soft);
+      padding: 5px 10px;
+      font-size: .875rem;
+      font-weight: 500;
       text-transform: capitalize;
       white-space: nowrap;
+      background: var(--surface);
     }
-    .badge.passed { color: var(--green); background: var(--green-bg); border-color: #c8e6d0; }
-    .badge.failed { color: var(--red); background: var(--red-bg); border-color: #f0c9c9; }
-    .badge.skipped { color: var(--amber); background: var(--amber-bg); border-color: #f0dc9f; }
-    .badge.hero { font-size: .95rem; padding: 8px 12px; }
-    .step { padding: 16px; margin-top: 12px; }
+    .badge.passed { color: var(--green); }
+    .badge.failed { color: var(--red); }
+    .badge.skipped { color: var(--amber); }
+    .badge.hero { font-size: 1rem; padding: 8px 14px; }
+    .step {
+      padding: 22px;
+      margin-top: 16px;
+      border: 1px solid var(--line-soft);
+      border-radius: 14px;
+    }
     .step-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-    .screenshot-link { display: block; margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: white; }
+    .screenshot-link {
+      display: block;
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: white;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, .06);
+    }
+    .screenshot-link:hover { text-decoration: none; }
     img { display: block; width: 100%; height: auto; }
-    .issue { padding: 12px; border-color: #f0c9c9; background: #fff8f8; }
-    .next { border-color: #d9d6cb; }
+    .issue {
+      padding: 16px;
+      border: 1px solid #ffd7d9;
+      border-radius: 12px;
+      background: #fff7f7;
+    }
+    .next { background: var(--surface); }
     .empty { color: var(--muted); }
-    .footer { margin-top: 28px; color: var(--muted); font-size: .9rem; }
+    .footer {
+      margin-top: 42px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line-soft);
+      color: var(--muted);
+      font-size: .9375rem;
+      overflow-wrap: anywhere;
+    }
+    ul:not(.stack) { margin: 14px 0 0; padding-left: 1.2rem; color: #424245; }
+    li + li { margin-top: 6px; }
     @media (max-width: 760px) {
-      main { padding: 24px 16px 40px; }
+      main { padding: 34px 18px 48px; }
       header.page { display: grid; }
       .summary { grid-template-columns: 1fr; }
     }

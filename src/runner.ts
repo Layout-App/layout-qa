@@ -92,7 +92,7 @@ function buildChecks(input: {
     },
     {
       id: 'scenario_ready',
-      label: 'Mock scenario is available',
+      label: 'Scenario flag is available',
       passed: scenarioReady,
       detail: input.controlsPresent
         ? `Layout QA controls detected; requested ${input.scenario}.`
@@ -155,11 +155,11 @@ function buildNextAction(input: {
       category: 'target_unreachable',
       title: 'Target URL did not load cleanly',
       detail:
-        'Layout could not reach the target page well enough to evaluate mock states.',
+        'Layout could not reach the target page well enough to evaluate deterministic response states.',
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
         'Start the app or deploy preview URL before running Layout QA.',
-        'Use the URL where the frontend is served with the Layout mock env flag enabled.',
+        'Use the URL where the frontend is served with the Layout QA env flag enabled.',
         'Retry the same scenario after the target URL is reachable from the runner.',
       ],
     };
@@ -168,14 +168,14 @@ function buildNextAction(input: {
   if (failedCheckIds.has('scenario_ready')) {
     return {
       category: 'fixtures',
-      title: 'Mock scenario was not active',
+      title: 'Scenario flag was not active',
       detail:
-        'The page loaded, but Layout could not confirm that the requested mock scenario was available.',
+        'The page loaded, but Layout could not confirm that the requested scenario was available.',
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
-        'Confirm the target is running with the Layout mock env flag set to 1.',
+        'Confirm the target is running with the Layout QA env flag set to 1.',
         'Check that the app reads localStorage["layout.qa.scenario"] before API calls run.',
-        `Review ${FLOW_MANIFEST_PATH}, the Layout QA docs, and the fixture file for missing handlers.`,
+        `Review ${FLOW_MANIFEST_PATH}, the Layout QA docs, and the API/auth response fixtures for missing handlers.`,
       ],
     };
   }
@@ -187,11 +187,11 @@ function buildNextAction(input: {
       title: 'Flow step needs review',
       detail:
         failedStep?.detail ||
-        'The target loaded with mocks, but a declared QA flow step failed.',
+        'The target loaded with deterministic responses, but a declared QA flow step failed.',
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
         `Inspect ${FLOW_MANIFEST_PATH} and confirm the failing step still matches the app UI.`,
-        'Update selectors, visible text assertions, or scenario fixtures so the flow follows real user behavior.',
+        'Update selectors, visible text assertions, or scenario responses so the flow follows real user behavior.',
         `Use ${QA_DOCS_URL} for the supported flow step schema.`,
       ],
     };
@@ -206,12 +206,12 @@ function buildNextAction(input: {
       category: 'browser_errors',
       title: 'Browser errors need review',
       detail:
-        'The target loaded with mocks, but browser errors or failed requests were observed.',
+        'The target loaded with deterministic responses, but browser errors or failed requests were observed.',
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
         'Inspect the issues captured on this QA run.',
-        'Add or correct fixtures for unhandled frontend API requests.',
-        'Fix app code that throws under the selected mock scenario, then rerun.',
+        'Add or correct fixtures for unhandled frontend API/auth requests.',
+        'Fix app code that throws under the selected scenario, then rerun.',
       ],
     };
   }
@@ -219,13 +219,13 @@ function buildNextAction(input: {
   if (appearsToBePublicOrAuthSurface(input.bodyTextSample)) {
     return {
       category: 'auth_boundary',
-      title: 'Public surface reached; wire mock auth next',
+      title: 'Public surface reached; wire deterministic auth next',
       detail:
-        'The run passed the basic mock-browser checks, but the page appears to be a logged-out or public surface. Authenticated flows need a mockable auth boundary before Layout can test them end to end.',
+        'The run passed the basic browser checks, but the page appears to be a logged-out or public surface. Authenticated flows need a deterministic auth boundary before Layout can test them end to end.',
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
-        `Use ${FLOW_MANIFEST_PATH} and the Layout QA docs to add or confirm a central mock auth boundary.`,
-        'Expose a deterministic mock user/session only when the Layout mock env flag is enabled.',
+        `Use ${FLOW_MANIFEST_PATH} and the Layout QA docs to add or confirm a central auth boundary for QA runs.`,
+        'Expose a deterministic user/session only when the Layout QA env flag is enabled.',
         'Point the next QA run at an authenticated route and rerun happy_path, empty, and error scenarios.',
       ],
     };
@@ -235,11 +235,11 @@ function buildNextAction(input: {
     category: 'ready',
     title: 'Ready for deeper flow coverage',
     detail:
-      'The target loaded with the requested mock scenario and no basic browser issues were detected.',
+      'The target loaded with the requested scenario and no basic browser issues were detected.',
     docsPath: FLOW_MANIFEST_PATH,
     nextSteps: [
       `Add route-specific Playwright-style flow steps to ${FLOW_MANIFEST_PATH} for the highest-value user path.`,
-      'Expand fixtures for any API calls encountered by that flow.',
+      'Expand deterministic API/auth responses for any requests encountered by that flow.',
       'Run the same flow across happy_path, empty, and error scenarios.',
     ],
   };
@@ -859,7 +859,7 @@ export function buildRunnerErrorResult(
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
         'Confirm the target URL is reachable by the runner.',
-        'Confirm the app is served with the Layout mock env flag enabled.',
+        'Confirm the app is served with the Layout QA env flag enabled.',
         'Retry after the target loads consistently in a browser.',
         `Viewport used for this run: ${formatViewport(viewport)}.`,
       ],
