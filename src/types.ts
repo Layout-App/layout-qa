@@ -62,6 +62,7 @@ export type QaTestRunResult = {
   checks: QaTestRunCheck[];
   issues: QaTestRunIssue[];
   flow?: QaTestRunFlowResult;
+  flows?: QaTestRunFlowResult[];
   nextAction?: QaTestRunNextAction;
 };
 
@@ -70,6 +71,8 @@ export type QaFlowStep = {
   type: string;
   label?: string;
   text?: string;
+  expectText?: string[];
+  expectNoConsoleErrors?: boolean;
   selector?: string;
   value?: string;
   url?: string;

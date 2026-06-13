@@ -4,6 +4,7 @@ import {spawn} from 'child_process';
 import {resolveDefaultPath} from './flows';
 import {
   ArtifactSummary,
+  QaTestRunFlowResult,
   QaTestRunFlowStepResult,
   QaTestRunResult,
 } from './types';
@@ -18,6 +19,17 @@ export function stepScreenshotFileName(index: number, stepId: string) {
   return `${String(index + 1).padStart(2, '0')}-${safeName(stepId)}.jpg`;
 }
 
+function flowStepScreenshotFileName(input: {
+  flow: QaTestRunFlowResult;
+  stepIndex: number;
+  stepId: string;
+}) {
+  return `${safeName(input.flow.id || 'flow')}-${stepScreenshotFileName(
+    input.stepIndex,
+    input.stepId
+  )}`;
+}
+
 async function writeDataUrl(filePath: string, dataUrl: string) {
   const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/);
   if (!match) return false;
@@ -28,13 +40,12 @@ async function writeDataUrl(filePath: string, dataUrl: string) {
 
 async function writeStepScreenshot(input: {
   screenshotsDir: string;
-  index: number;
+  fileName: string;
   step: QaTestRunFlowStepResult;
 }) {
   if (!input.step.screenshotDataUrl) return '';
 
-  const fileName = stepScreenshotFileName(input.index, input.step.id);
-  const filePath = path.join(input.screenshotsDir, fileName);
+  const filePath = path.join(input.screenshotsDir, input.fileName);
   const written = await writeDataUrl(filePath, input.step.screenshotDataUrl);
   return written ? filePath : '';
 }
@@ -101,8 +112,19 @@ function renderIssueList(result: QaTestRunResult) {
     .join('')}</ul>`;
 }
 
-function renderStepList(input: {runDir: string; result: QaTestRunResult}) {
-  const steps = input.result.flow?.steps || [];
+function resultFlows(result: QaTestRunResult) {
+  return result.flows?.length
+    ? result.flows
+    : result.flow
+      ? [result.flow]
+      : [];
+}
+
+function renderStepList(input: {
+  runDir: string;
+  flow: QaTestRunFlowResult;
+}) {
+  const steps = input.flow.steps || [];
   if (steps.length === 0) return '<p class="empty">No flow steps declared.</p>';
 
   return steps
@@ -113,7 +135,11 @@ function renderStepList(input: {runDir: string; result: QaTestRunResult}) {
             path.join(
               input.runDir,
               'screenshots',
-              stepScreenshotFileName(index, step.id)
+              flowStepScreenshotFileName({
+                flow: input.flow,
+                stepIndex: index,
+                stepId: step.id,
+              })
             )
           )
         : '';
@@ -157,7 +183,13 @@ function renderReport(input: {
       )
     : '';
   const resultHref = relativeHref(input.runDir, input.resultPath);
-  const flow = input.result.flow;
+  const flows = resultFlows(input.result);
+  const flowSummary =
+    flows.length === 0
+      ? 'None'
+      : flows.length === 1
+        ? flows[0].name
+        : `${flows.length} flows`;
   const viewport = input.result.viewport;
   const failedCheckCount = input.result.checks.filter(
     check => !check.passed
@@ -338,9 +370,7 @@ function renderReport(input: {
       <div class="metric"><dt>Scenario</dt><dd>${escapeHtml(
         input.scenario
       )}</dd></div>
-      <div class="metric"><dt>Flow</dt><dd>${escapeHtml(
-        flow?.name || 'None'
-      )}</dd></div>
+      <div class="metric"><dt>Flows</dt><dd>${escapeHtml(flowSummary)}</dd></div>
       <div class="metric"><dt>Target URL</dt><dd>${escapeHtml(
         input.targetUrl
       )}</dd></div>
@@ -357,10 +387,14 @@ function renderReport(input: {
       <ul class="stack">${renderCheckList(input.result)}</ul>
     </section>
 
-    <section>
-      <h2>${escapeHtml(flow?.name || 'Flow Steps')}</h2>
-      ${renderStepList({runDir: input.runDir, result: input.result})}
-    </section>
+    ${flows
+      .map(
+        flow => `<section>
+      <h2>${escapeHtml(flow.name || flow.id)}</h2>
+      ${renderStepList({runDir: input.runDir, flow})}
+    </section>`
+      )
+      .join('')}
 
     ${
       finalScreenshotHref
@@ -429,13 +463,19 @@ export async function writeArtifacts(input: {
     }
   }
 
-  for (const [index, step] of (input.result.flow?.steps || []).entries()) {
-    const screenshotPath = await writeStepScreenshot({
-      screenshotsDir,
-      index,
-      step,
-    });
-    if (screenshotPath) screenshots.push(screenshotPath);
+  for (const flow of resultFlows(input.result)) {
+    for (const [index, step] of flow.steps.entries()) {
+      const screenshotPath = await writeStepScreenshot({
+        screenshotsDir,
+        fileName: flowStepScreenshotFileName({
+          flow,
+          stepIndex: index,
+          stepId: step.id,
+        }),
+        step,
+      });
+      if (screenshotPath) screenshots.push(screenshotPath);
+    }
   }
 
   const resultPath = path.join(runDir, 'result.json');

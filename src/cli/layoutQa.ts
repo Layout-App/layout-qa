@@ -2,16 +2,24 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import {request as httpRequest} from 'http';
+import {request as httpsRequest} from 'https';
+import {URL} from 'url';
 import {
   FLOW_MANIFEST_PATH,
   getTestTimeoutMs,
-  loadFlow,
+  loadFlows,
   resolveDefaultPath,
   starterFlowManifest,
 } from '../flows';
 import {buildRunnerErrorResult, isQaRunPassed, runLayoutQaBrowser} from '../runner';
 import {openReport, writeArtifacts} from '../report';
-import {ArtifactSummary, QaTestRunResult, QaViewport} from '../types';
+import {
+  ArtifactSummary,
+  QaTestRunFlowResult,
+  QaTestRunResult,
+  QaViewport,
+} from '../types';
 import {formatViewport, parseViewport} from '../viewports';
 
 type CliOptions = {
@@ -20,6 +28,13 @@ type CliOptions = {
   scenario: string;
   flowsPath: string;
   outDir: string;
+  uploadUrl: string;
+  uploadToken: string;
+  repo: string;
+  branch: string;
+  commitSha: string;
+  prNumber: string;
+  runSource: 'local' | 'github_actions';
   viewport: QaViewport;
   timeoutMs?: number;
   headed: boolean;
@@ -40,19 +55,26 @@ Usage:
   npx layout-qa run --target-url <url> [options]
 
 Commands:
-  init                  Write a starter .layout/qa-flows.json.
+  init                  Write a starter .layout/qa.json.
   run                   Run browser QA and write a local HTML report.
 
 Options:
   --target-url <url>     URL of the running frontend to test.
   --scenario <name>      Scenario to activate. Defaults to happy_path.
-  --flows <path>         Flow manifest path. Defaults to .layout/qa-flows.json.
+  --flows <path>         Flow manifest path. Defaults to .layout/qa.json.
   --out <path>           Artifact directory. Defaults to .layout/runs.
   --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
   --timeout <ms>         Browser run timeout. Defaults to LAYOUT_QA_TEST_TIMEOUT_MS or 60000.
   --headed               Show the browser instead of running headless.
   --open                 Open the generated local HTML report after the run.
   --json                 Print machine-readable JSON.
+  --upload-url <url>     Upload completed run JSON/screenshots to Layout.
+  --upload-token <token> Project upload token for hosted Layout reports.
+  --repo <name>          Repository full name, e.g. owner/repo.
+  --branch <name>        Branch name for report metadata.
+  --commit-sha <sha>     Commit SHA for report metadata.
+  --pr-number <number>   Pull request number for report metadata.
+  --run-source <value>   local or github_actions. Defaults from environment.
   --force                Overwrite an existing flow file during init.
   --help                 Show this help.
 `);
@@ -68,10 +90,37 @@ function hasFlag(args: string[], name: string) {
   return args.includes(name);
 }
 
+function envValue(name: string) {
+  return process.env[name] || '';
+}
+
+async function githubEventPullRequestNumber() {
+  const eventPath = envValue('GITHUB_EVENT_PATH');
+  if (!eventPath) return '';
+  const content = await fs.readFile(eventPath, 'utf8').catch(() => '');
+  if (!content) return '';
+  const event = JSON.parse(content) as {pull_request?: {number?: number}};
+  return event.pull_request?.number ? String(event.pull_request.number) : '';
+}
+
+function inferGithubPrNumber() {
+  const ref = envValue('GITHUB_REF');
+  const match = ref.match(/^refs\/pull\/(\d+)\//);
+  return match?.[1] || '';
+}
+
+function inferBranch() {
+  return envValue('GITHUB_HEAD_REF') || envValue('GITHUB_REF_NAME');
+}
+
 function parseArgs(args: string[]): CliOptions {
   const command = args[0] && !args[0].startsWith('--') ? args[0] : 'help';
   const timeoutValue = readFlag(args, '--timeout');
   const parsedTimeoutMs = timeoutValue ? Number(timeoutValue) : undefined;
+  const rawRunSource =
+    readFlag(args, '--run-source') ||
+    envValue('LAYOUT_RUN_SOURCE') ||
+    (envValue('GITHUB_ACTIONS') === 'true' ? 'github_actions' : 'local');
 
   if (
     timeoutValue &&
@@ -86,6 +135,23 @@ function parseArgs(args: string[]): CliOptions {
     scenario: readFlag(args, '--scenario') || 'happy_path',
     flowsPath: readFlag(args, '--flows'),
     outDir: readFlag(args, '--out'),
+    uploadUrl: readFlag(args, '--upload-url') || envValue('LAYOUT_UPLOAD_URL'),
+    uploadToken:
+      readFlag(args, '--upload-token') || envValue('LAYOUT_UPLOAD_TOKEN'),
+    repo:
+      readFlag(args, '--repo') ||
+      envValue('LAYOUT_REPOSITORY') ||
+      envValue('GITHUB_REPOSITORY'),
+    branch: readFlag(args, '--branch') || envValue('LAYOUT_BRANCH') || inferBranch(),
+    commitSha:
+      readFlag(args, '--commit-sha') ||
+      envValue('LAYOUT_COMMIT_SHA') ||
+      envValue('GITHUB_SHA'),
+    prNumber:
+      readFlag(args, '--pr-number') ||
+      envValue('LAYOUT_PR_NUMBER') ||
+      inferGithubPrNumber(),
+    runSource: rawRunSource === 'github_actions' ? 'github_actions' : 'local',
     viewport: parseViewport(readFlag(args, '--viewport')),
     timeoutMs: parsedTimeoutMs,
     headed: hasFlag(args, '--headed'),
@@ -135,6 +201,7 @@ function printHumanSummary(input: {
   artifacts: ArtifactSummary;
 }) {
   const passed = isQaRunPassed(input.result);
+  const flows = resultFlows(input.result);
   process.stdout.write(
     `\nLayout QA ${passed ? 'passed' : 'failed'}\n` +
       `Scenario: ${input.scenario}\n` +
@@ -145,9 +212,7 @@ function printHumanSummary(input: {
           : 'unavailable'
       }\n` +
       `Final URL: ${input.result.finalUrl || 'unavailable'}\n` +
-      `Flow: ${input.result.flow?.name || 'None'} (${
-        input.result.flow?.source || 'none'
-      })\n` +
+      `Flows: ${flows.length || 0}\n` +
       `Manifest: ${
         input.manifestFound ? input.manifestPath : 'not found; default smoke'
       }\n\n`
@@ -161,9 +226,10 @@ function printHumanSummary(input: {
     );
   }
 
-  if (input.result.flow?.steps.length) {
+  for (const flow of flows) {
     process.stdout.write('\nFlow steps:\n');
-    for (const step of input.result.flow.steps) {
+    process.stdout.write(`${flow.name} (${flow.source})\n`);
+    for (const step of flow.steps) {
       process.stdout.write(
         `${statusIcon(step.status === 'passed')} ${step.label || step.id}${
           step.detail ? ` - ${step.detail}` : ''
@@ -198,12 +264,174 @@ function resultForConsole(result: QaTestRunResult) {
   const clean = JSON.parse(JSON.stringify(result)) as Record<string, unknown>;
   delete clean.screenshotDataUrl;
 
-  const flow = clean.flow as {steps?: Record<string, unknown>[]} | undefined;
-  for (const step of flow?.steps || []) {
-    delete step.screenshotDataUrl;
+  const scrubFlow = (flow?: {steps?: Record<string, unknown>[]}) => {
+    for (const step of flow?.steps || []) {
+      delete step.screenshotDataUrl;
+    }
+  };
+
+  scrubFlow(clean.flow as {steps?: Record<string, unknown>[]} | undefined);
+  const flows = clean.flows as {steps?: Record<string, unknown>[]}[] | undefined;
+  for (const flow of flows || []) {
+    scrubFlow(flow);
   }
 
   return clean;
+}
+
+function resultFlows(result: QaTestRunResult) {
+  return result.flows?.length
+    ? result.flows
+    : result.flow
+      ? [result.flow]
+      : [];
+}
+
+function combineFlowRunResults(results: QaTestRunResult[]) {
+  if (results.length === 1) {
+    const [result] = results;
+    return {
+      ...result,
+      flows: resultFlows(result),
+    };
+  }
+
+  const flows = results
+    .map(result => result.flow)
+    .filter((flow): flow is QaTestRunFlowResult => Boolean(flow));
+  const lastResult = results[results.length - 1];
+  const firstFailed = results.find(result => !isQaRunPassed(result));
+
+  return {
+    finalUrl: lastResult.finalUrl,
+    title: lastResult.title,
+    scenarioActive: lastResult.scenarioActive,
+    controlsPresent: lastResult.controlsPresent,
+    screenshotDataUrl: lastResult.screenshotDataUrl,
+    screenshotBytes: lastResult.screenshotBytes,
+    bodyTextSample: results.map(result => result.bodyTextSample || '').join('\n\n'),
+    viewport: lastResult.viewport,
+    checks: results.flatMap(result => {
+      const flowName = result.flow?.name || 'Flow';
+      const flowId = result.flow?.id || 'flow';
+      return result.checks.map(check => ({
+        ...check,
+        id: `${flowId}_${check.id}`,
+        label: `${flowName}: ${check.label}`,
+      }));
+    }),
+    issues: results.flatMap(result => result.issues),
+    flow: flows[0],
+    flows,
+    nextAction: firstFailed?.nextAction || lastResult.nextAction,
+  } satisfies QaTestRunResult;
+}
+
+function readFileAsDataUrl(filePath: string) {
+  return fs.readFile(filePath).then(buffer => {
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeType =
+      ext === '.html'
+        ? 'text/html'
+        : ext === '.json'
+          ? 'application/json'
+          : 'image/jpeg';
+    return `data:${mimeType};base64,${buffer.toString('base64')}`;
+  });
+}
+
+function postJson(input: {
+  url: string;
+  token: string;
+  body: Record<string, unknown>;
+}) {
+  const target = new URL(input.url);
+  const request = target.protocol === 'https:' ? httpsRequest : httpRequest;
+  const body = JSON.stringify(input.body);
+
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
+    const req = request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${input.token}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          'User-Agent': '@trylayout/qa',
+        },
+      },
+      res => {
+        let responseBody = '';
+        res.setEncoding('utf8');
+        res.on('data', chunk => {
+          responseBody += chunk;
+        });
+        res.on('end', () => {
+          const parsed = responseBody
+            ? (JSON.parse(responseBody) as Record<string, unknown>)
+            : {};
+          if (!res.statusCode || res.statusCode >= 400) {
+            reject(
+              new Error(
+                `Upload failed (${res.statusCode || 'unknown'}): ${
+                  parsed.message || parsed.error || responseBody
+                }`
+              )
+            );
+            return;
+          }
+          resolve(parsed);
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function uploadRun(input: {
+  options: CliOptions;
+  result: QaTestRunResult;
+  artifacts: ArtifactSummary;
+  manifestPath: string;
+  manifestFound: boolean;
+  passed: boolean;
+}) {
+  if (!input.options.uploadUrl && !input.options.uploadToken) return null;
+  if (!input.options.uploadUrl || !input.options.uploadToken) {
+    throw new Error('--upload-url and --upload-token must be provided together.');
+  }
+
+  const prNumber =
+    input.options.prNumber || (await githubEventPullRequestNumber());
+  const reportDataUrl = await readFileAsDataUrl(input.artifacts.reportPath);
+
+  return postJson({
+    url: input.options.uploadUrl,
+    token: input.options.uploadToken,
+    body: {
+      status: input.passed ? 'passed' : 'failed',
+      runSource: input.options.runSource,
+      repository: input.options.repo,
+      branch: input.options.branch,
+      commitSha: input.options.commitSha,
+      prNumber: prNumber ? Number(prNumber) : undefined,
+      scenario: input.options.scenario,
+      targetUrl: input.options.targetUrl,
+      manifestPath: input.manifestPath,
+      manifestFound: input.manifestFound,
+      result: input.result,
+      report: {
+        fileName: 'index.html',
+        dataUrl: reportDataUrl,
+      },
+    },
+  });
 }
 
 async function runCommand(options: CliOptions) {
@@ -211,25 +439,30 @@ async function runCommand(options: CliOptions) {
     throw new Error('--target-url is required.');
   }
 
-  const {flow, manifestPath, manifestFound} = await loadFlow({
+  const {flows, manifestPath, manifestFound} = await loadFlows({
     flowsPath: options.flowsPath,
     scenario: options.scenario,
   });
-  let result: QaTestRunResult;
+  const results: QaTestRunResult[] = [];
 
-  try {
-    result = await runLayoutQaBrowser({
-      targetUrl: options.targetUrl,
-      scenario: options.scenario,
-      flow,
-      timeoutMs: options.timeoutMs || getTestTimeoutMs(),
-      headless: !options.headed,
-      viewport: options.viewport,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    result = buildRunnerErrorResult(message, options.viewport);
+  for (const flow of flows) {
+    try {
+      results.push(
+        await runLayoutQaBrowser({
+          targetUrl: options.targetUrl,
+          scenario: options.scenario,
+          flow,
+          timeoutMs: options.timeoutMs || getTestTimeoutMs(),
+          headless: !options.headed,
+          viewport: options.viewport,
+        })
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      results.push(buildRunnerErrorResult(message, options.viewport));
+    }
   }
+  const result = combineFlowRunResults(results);
 
   const artifacts = await writeArtifacts({
     outDir: options.outDir,
@@ -240,6 +473,14 @@ async function runCommand(options: CliOptions) {
     result,
   });
   const passed = isQaRunPassed(result);
+  const uploadResponse = await uploadRun({
+    options,
+    result,
+    artifacts,
+    manifestPath,
+    manifestFound,
+    passed,
+  });
 
   if (options.json) {
     process.stdout.write(
@@ -252,6 +493,7 @@ async function runCommand(options: CliOptions) {
           manifestPath,
           manifestFound,
           artifacts,
+          upload: uploadResponse,
           result: resultForConsole(result),
         },
         null,
@@ -271,6 +513,12 @@ async function runCommand(options: CliOptions) {
 
   if (options.open) {
     await openReport(artifacts.reportPath);
+  }
+
+  if (uploadResponse && !options.json) {
+    process.stdout.write(
+      `Uploaded: ${String(uploadResponse.reportUrl || uploadResponse.runId)}\n`
+    );
   }
 
   process.exitCode = passed ? 0 : 1;

@@ -519,9 +519,35 @@ async function executeFlowStep(input: {
   step: QaFlowStep;
   targetUrl: string;
   timeoutMs: number;
+  issues: QaTestRunIssue[];
 }) {
   const stepTimeout = input.step.timeoutMs || Math.min(input.timeoutMs, 10000);
   const exact = input.step.exact === true;
+  const withExpectations = async (detail: string) => {
+    const expectationDetails: string[] = [];
+
+    for (const text of input.step.expectText || []) {
+      await input.page
+        .getByText(text, {exact})
+        .first()
+        .waitFor({state: 'visible', timeout: stepTimeout});
+      expectationDetails.push(`Visible text found: ${text}`);
+    }
+
+    if (input.step.expectNoConsoleErrors) {
+      const browserErrors = input.issues.filter(entry =>
+        ['console_error', 'page_error'].includes(entry.type)
+      );
+      if (browserErrors.length > 0) {
+        throw new Error(
+          `Expected no console/page errors, found ${browserErrors.length}.`
+        );
+      }
+      expectationDetails.push('No console/page errors observed.');
+    }
+
+    return [detail, ...expectationDetails].filter(Boolean).join(' ');
+  };
 
   if (input.step.type === 'goto') {
     const target = resolveTargetUrl(
@@ -534,7 +560,7 @@ async function executeFlowStep(input: {
       .catch(() => {
         // DOM assertions after the step are the source of truth.
       });
-    return `Navigated to ${target}`;
+    return withExpectations(`Navigated to ${target}`);
   }
 
   if (
@@ -546,7 +572,7 @@ async function executeFlowStep(input: {
       .getByText(text, {exact})
       .first()
       .waitFor({state: 'visible', timeout: stepTimeout});
-    return `Visible text found: ${text}`;
+    return withExpectations(`Visible text found: ${text}`);
   }
 
   if (input.step.type === 'click') {
@@ -554,12 +580,12 @@ async function executeFlowStep(input: {
       await input.page
         .locator(input.step.selector)
         .click({timeout: stepTimeout});
-      return `Clicked selector: ${input.step.selector}`;
+      return withExpectations(`Clicked selector: ${input.step.selector}`);
     }
 
     const text = requireStepValue(input.step.text, 'text or selector');
     await input.page.getByText(text, {exact}).click({timeout: stepTimeout});
-    return `Clicked text: ${text}`;
+    return withExpectations(`Clicked text: ${text}`);
   }
 
   if (input.step.type === 'fill') {
@@ -567,7 +593,7 @@ async function executeFlowStep(input: {
     await input.page
       .locator(selector)
       .fill(input.step.value || '', {timeout: stepTimeout});
-    return `Filled selector: ${selector}`;
+    return withExpectations(`Filled selector: ${selector}`);
   }
 
   if (input.step.type === 'assert_url') {
@@ -583,33 +609,39 @@ async function executeFlowStep(input: {
     ) {
       throw new Error(`Expected URL ${input.step.url}, got ${currentUrl}.`);
     }
-    return `URL matched: ${currentUrl}`;
+    return withExpectations(`URL matched: ${currentUrl}`);
   }
 
   if (input.step.type === 'assert_no_horizontal_overflow') {
-    return assertNoHorizontalOverflow(input.page, input.step.tolerance ?? 1);
+    return withExpectations(
+      await assertNoHorizontalOverflow(input.page, input.step.tolerance ?? 1)
+    );
   }
 
   if (input.step.type === 'assert_in_viewport') {
-    return assertElementInViewport({
-      page: input.page,
-      step: input.step,
-      exact,
-      timeoutMs: stepTimeout,
-    });
+    return withExpectations(
+      await assertElementInViewport({
+        page: input.page,
+        step: input.step,
+        exact,
+        timeoutMs: stepTimeout,
+      })
+    );
   }
 
   if (input.step.type === 'assert_box') {
-    return assertElementBox({
-      page: input.page,
-      step: input.step,
-      exact,
-      timeoutMs: stepTimeout,
-    });
+    return withExpectations(
+      await assertElementBox({
+        page: input.page,
+        step: input.step,
+        exact,
+        timeoutMs: stepTimeout,
+      })
+    );
   }
 
   if (input.step.type === 'screenshot') {
-    return 'Captured screenshot checkpoint.';
+    return withExpectations('Captured screenshot checkpoint.');
   }
 
   throw new Error(`Unsupported flow step type: ${input.step.type}`);
@@ -639,6 +671,7 @@ async function runFlow(input: {
         step,
         targetUrl: input.targetUrl,
         timeoutMs: input.timeoutMs,
+        issues: input.issues,
       });
       result.url = input.page.url();
 

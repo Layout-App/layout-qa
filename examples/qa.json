@@ -1,17 +1,19 @@
 {
-  "schemaVersion": 1,
+  "version": 1,
+  "baseUrl": "$LAYOUT_BASE_URL",
+  "viewports": ["desktop"],
   "flows": [
     {
       "id": "smoke",
-      "name": "Smoke",
-      "startUrl": "/",
+      "label": "Smoke",
       "scenarios": ["happy_path"],
       "steps": [
+        {"visit": "/"},
         {
-          "id": "initial_screen",
-          "type": "screenshot",
-          "label": "Initial screen",
-          "screenshot": true
+          "screenshot": "Initial screen",
+          "expect": {
+            "noConsoleErrors": true
+          }
         },
         {
           "id": "no_horizontal_overflow",
