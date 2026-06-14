@@ -34,6 +34,7 @@ type CliOptions = {
   branch: string;
   commitSha: string;
   prNumber: string;
+  runId: string;
   runSource: 'local' | 'github_actions';
   viewport: QaViewport;
   timeoutMs?: number;
@@ -69,11 +70,12 @@ Options:
   --open                 Open the generated local HTML report after the run.
   --json                 Print machine-readable JSON.
   --upload-url <url>     Upload completed run JSON/screenshots to Layout.
-  --upload-token <token> Project upload token for hosted Layout reports.
+  --upload-token <token> Layout organization upload token for hosted reports.
   --repo <name>          Repository full name, e.g. owner/repo.
   --branch <name>        Branch name for report metadata.
   --commit-sha <sha>     Commit SHA for report metadata.
   --pr-number <number>   Pull request number for report metadata.
+  --run-id <id>          Existing Layout run id to update after workflow_dispatch.
   --run-source <value>   local or github_actions. Defaults from environment.
   --force                Overwrite an existing flow file during init.
   --help                 Show this help.
@@ -151,6 +153,7 @@ function parseArgs(args: string[]): CliOptions {
       readFlag(args, '--pr-number') ||
       envValue('LAYOUT_PR_NUMBER') ||
       inferGithubPrNumber(),
+    runId: readFlag(args, '--run-id') || envValue('LAYOUT_RUN_ID'),
     runSource: rawRunSource === 'github_actions' ? 'github_actions' : 'local',
     viewport: parseViewport(readFlag(args, '--viewport')),
     timeoutMs: parsedTimeoutMs,
@@ -421,6 +424,7 @@ async function uploadRun(input: {
       branch: input.options.branch,
       commitSha: input.options.commitSha,
       prNumber: prNumber ? Number(prNumber) : undefined,
+      runId: input.options.runId,
       scenario: input.options.scenario,
       targetUrl: input.options.targetUrl,
       manifestPath: input.manifestPath,
