@@ -57,6 +57,9 @@ export type QaTestRunResult = {
   controlsPresent?: boolean;
   screenshotDataUrl?: string;
   screenshotBytes?: number;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
   bodyTextSample?: string;
   viewport?: QaViewport;
   checks: QaTestRunCheck[];

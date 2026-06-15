@@ -120,6 +120,27 @@ function resultFlows(result: QaTestRunResult) {
       : [];
 }
 
+function formatDurationMs(value: unknown) {
+  const duration = Number(value);
+  if (!Number.isFinite(duration) || duration < 0) return 'unavailable';
+  if (duration < 1000) return `${Math.round(duration)}ms`;
+
+  const seconds = Math.round(duration / 1000);
+  if (seconds < 60) return `${seconds}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) {
+    return remainingSeconds
+      ? `${minutes}m ${remainingSeconds}s`
+      : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
 function renderStepList(input: {
   runDir: string;
   flow: QaTestRunFlowResult;
@@ -376,6 +397,9 @@ function renderReport(input: {
       )}</dd></div>
       <div class="metric"><dt>Viewport</dt><dd>${escapeHtml(
         viewport ? formatViewport(viewport) : 'unavailable'
+      )}</dd></div>
+      <div class="metric"><dt>Duration</dt><dd>${escapeHtml(
+        formatDurationMs(input.result.durationMs)
       )}</dd></div>
       <div class="metric"><dt>Final URL</dt><dd>${escapeHtml(
         input.result.finalUrl || 'unavailable'

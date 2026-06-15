@@ -720,6 +720,8 @@ export async function runLayoutQaBrowser(input: {
   headless?: boolean;
   viewport?: QaViewport;
 }) {
+  const runStartedAtMs = Date.now();
+  const runStartedAt = new Date(runStartedAtMs).toISOString();
   const timeoutMs = input.timeoutMs || DEFAULT_TEST_TIMEOUT_MS;
   const viewport = input.viewport || DEFAULT_VIEWPORT;
   const issues: QaTestRunIssue[] = [];
@@ -836,6 +838,7 @@ export async function runLayoutQaBrowser(input: {
       flow: flowResult,
     });
 
+    const runCompletedAtMs = Date.now();
     return {
       finalUrl: pageState.finalUrl,
       title: pageState.title,
@@ -843,6 +846,9 @@ export async function runLayoutQaBrowser(input: {
       controlsPresent: pageState.controlsPresent,
       screenshotDataUrl,
       screenshotBytes: screenshot.byteLength,
+      startedAt: runStartedAt,
+      completedAt: new Date(runCompletedAtMs).toISOString(),
+      durationMs: runCompletedAtMs - runStartedAtMs,
       bodyTextSample: pageState.bodyTextSample,
       viewport,
       checks,
@@ -869,8 +875,12 @@ export function buildRunnerErrorResult(
   message: string,
   viewport: QaViewport = DEFAULT_VIEWPORT
 ): QaTestRunResult {
+  const now = new Date().toISOString();
   return {
     viewport,
+    startedAt: now,
+    completedAt: now,
+    durationMs: 0,
     checks: [
       {
         id: 'runner_error',

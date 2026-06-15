@@ -195,6 +195,27 @@ function statusIcon(passed: boolean) {
   return passed ? 'PASS' : 'FAIL';
 }
 
+function formatDurationMs(value: unknown) {
+  const duration = Number(value);
+  if (!Number.isFinite(duration) || duration < 0) return 'unavailable';
+  if (duration < 1000) return `${Math.round(duration)}ms`;
+
+  const seconds = Math.round(duration / 1000);
+  if (seconds < 60) return `${seconds}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) {
+    return remainingSeconds
+      ? `${minutes}m ${remainingSeconds}s`
+      : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
 function printHumanSummary(input: {
   result: QaTestRunResult;
   scenario: string;
@@ -215,6 +236,7 @@ function printHumanSummary(input: {
           : 'unavailable'
       }\n` +
       `Final URL: ${input.result.finalUrl || 'unavailable'}\n` +
+      `Duration: ${formatDurationMs(input.result.durationMs)}\n` +
       `Flows: ${flows.length || 0}\n` +
       `Manifest: ${
         input.manifestFound ? input.manifestPath : 'not found; default smoke'
@@ -304,6 +326,19 @@ function combineFlowRunResults(results: QaTestRunResult[]) {
     .filter((flow): flow is QaTestRunFlowResult => Boolean(flow));
   const lastResult = results[results.length - 1];
   const firstFailed = results.find(result => !isQaRunPassed(result));
+  const startedAt = results
+    .map(result => result.startedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()[0];
+  const completedAt = results
+    .map(result => result.completedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .slice(-1)[0];
+  const durationMs =
+    typeof startedAt === 'string' && typeof completedAt === 'string'
+      ? Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime())
+      : results.reduce((sum, result) => sum + (result.durationMs || 0), 0);
 
   return {
     finalUrl: lastResult.finalUrl,
@@ -312,6 +347,9 @@ function combineFlowRunResults(results: QaTestRunResult[]) {
     controlsPresent: lastResult.controlsPresent,
     screenshotDataUrl: lastResult.screenshotDataUrl,
     screenshotBytes: lastResult.screenshotBytes,
+    startedAt,
+    completedAt,
+    durationMs,
     bodyTextSample: results.map(result => result.bodyTextSample || '').join('\n\n'),
     viewport: lastResult.viewport,
     checks: results.flatMap(result => {
@@ -427,6 +465,9 @@ async function uploadRun(input: {
       runId: input.options.runId,
       scenario: input.options.scenario,
       targetUrl: input.options.targetUrl,
+      startedAt: input.result.startedAt,
+      completedAt: input.result.completedAt,
+      durationMs: input.result.durationMs,
       manifestPath: input.manifestPath,
       manifestFound: input.manifestFound,
       result: input.result,
