@@ -35,14 +35,18 @@ type CliOptions = {
   mockRoot: string;
   port?: number;
   outDir: string;
+  apiUrl: string;
+  apiKey: string;
   uploadUrl: string;
-  uploadToken: string;
   repo: string;
   branch: string;
   commitSha: string;
   prNumber: string;
   runId: string;
   runSource: 'local' | 'github_actions';
+  mode: 'scripted' | 'exploratory';
+  intent: string;
+  workflowId: string;
   viewport: QaViewport;
   timeoutMs?: number;
   headed: boolean;
@@ -59,16 +63,19 @@ Usage:
   trylayout init [options]
   trylayout mock-api [options]
   trylayout run --target-url <url> [options]
+  trylayout remote run --repo <owner/repo> --ref <branch> [options]
   layout-qa mock-api [options]
   layout-qa run --target-url <url> [options]
   npx @trylayout/qa mock-api [options]
   npx @trylayout/qa run --target-url <url> [options]
+  npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
   npx layout-qa run --target-url <url> [options]
 
 Commands:
   init                  Write a starter .layout/qa.json.
   mock-api              Start a Layout mock API server from .layout/mocks.
   run                   Run browser QA and write a local HTML report.
+  remote run            Ask Layout to run browser QA against a repo/ref.
 
 Options:
   --target-url <url>     URL of the running frontend to test.
@@ -82,14 +89,19 @@ Options:
   --headed               Show the browser instead of running headless.
   --open                 Open the generated local HTML report after the run.
   --json                 Print machine-readable JSON.
+  --api-url <url>        Layout API base URL. Defaults to https://trylayout.com/api/v1/qa.
+  --api-key <key>        Layout organization API key for uploads and remote runs.
   --upload-url <url>     Upload completed run JSON/screenshots to Layout.
-  --upload-token <token> Layout organization upload token for hosted reports.
   --repo <name>          Repository full name, e.g. owner/repo.
   --branch <name>        Branch name for report metadata.
+  --ref <name>           Branch/ref for a remote run. Defaults to --branch.
   --commit-sha <sha>     Commit SHA for report metadata.
   --pr-number <number>   Pull request number for report metadata.
   --run-id <id>          Existing Layout run id to update after workflow_dispatch.
   --run-source <value>   local or github_actions. Defaults from environment.
+  --mode <value>         scripted or ai. Defaults to ai for remote run.
+  --intent <text>        Natural-language intent for AI testing remote runs.
+  --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
   --force                Overwrite an existing flow file during init.
   --help                 Show this help.
 `);
@@ -129,7 +141,9 @@ function inferBranch() {
 }
 
 function parseArgs(args: string[]): CliOptions {
-  const command = args[0] && !args[0].startsWith('--') ? args[0] : 'help';
+  const firstCommand = args[0] && !args[0].startsWith('--') ? args[0] : 'help';
+  const command =
+    firstCommand === 'remote' && args[1] === 'run' ? 'remote-run' : firstCommand;
   const timeoutValue = readFlag(args, '--timeout');
   const parsedTimeoutMs = timeoutValue ? Number(timeoutValue) : undefined;
   const portValue = readFlag(args, '--port');
@@ -157,14 +171,24 @@ function parseArgs(args: string[]): CliOptions {
     mockRoot: readFlag(args, '--mock-root'),
     port: parsedPort,
     outDir: readFlag(args, '--out'),
+    apiUrl:
+      readFlag(args, '--api-url') ||
+      envValue('LAYOUT_API_URL') ||
+      'https://trylayout.com/api/v1/qa',
+    apiKey:
+      readFlag(args, '--api-key') ||
+      envValue('LAYOUT_API_KEY'),
     uploadUrl: readFlag(args, '--upload-url') || envValue('LAYOUT_UPLOAD_URL'),
-    uploadToken:
-      readFlag(args, '--upload-token') || envValue('LAYOUT_UPLOAD_TOKEN'),
     repo:
       readFlag(args, '--repo') ||
       envValue('LAYOUT_REPOSITORY') ||
       envValue('GITHUB_REPOSITORY'),
-    branch: readFlag(args, '--branch') || envValue('LAYOUT_BRANCH') || inferBranch(),
+    branch:
+      readFlag(args, '--ref') ||
+      readFlag(args, '--branch') ||
+      envValue('LAYOUT_REF') ||
+      envValue('LAYOUT_BRANCH') ||
+      inferBranch(),
     commitSha:
       readFlag(args, '--commit-sha') ||
       envValue('LAYOUT_COMMIT_SHA') ||
@@ -175,6 +199,14 @@ function parseArgs(args: string[]): CliOptions {
       inferGithubPrNumber(),
     runId: readFlag(args, '--run-id') || envValue('LAYOUT_RUN_ID'),
     runSource: rawRunSource === 'github_actions' ? 'github_actions' : 'local',
+    mode: /^(scripted|checks?)$/i.test(readFlag(args, '--mode'))
+      ? 'scripted'
+      : 'exploratory',
+    intent: readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
+    workflowId:
+      readFlag(args, '--workflow-id') ||
+      envValue('LAYOUT_WORKFLOW_ID') ||
+      'layout-verify.yml',
     viewport: parseViewport(readFlag(args, '--viewport')),
     timeoutMs: parsedTimeoutMs,
     headed: hasFlag(args, '--headed'),
@@ -531,7 +563,7 @@ function postJson(input: {
           if (!res.statusCode || res.statusCode >= 400) {
             reject(
               new Error(
-                `Upload failed (${res.statusCode || 'unknown'}): ${
+                `Request failed (${res.statusCode || 'unknown'}): ${
                   parsed.message || parsed.error || responseBody
                 }`
               )
@@ -556,9 +588,9 @@ async function uploadRun(input: {
   manifestFound: boolean;
   passed: boolean;
 }) {
-  if (!input.options.uploadUrl && !input.options.uploadToken) return null;
-  if (!input.options.uploadUrl || !input.options.uploadToken) {
-    throw new Error('--upload-url and --upload-token must be provided together.');
+  if (!input.options.uploadUrl) return null;
+  if (!input.options.apiKey) {
+    throw new Error('--upload-url requires --api-key.');
   }
 
   const prNumber =
@@ -567,7 +599,7 @@ async function uploadRun(input: {
 
   return postJson({
     url: input.options.uploadUrl,
-    token: input.options.uploadToken,
+    token: input.options.apiKey,
     body: {
       status: input.passed ? 'passed' : 'failed',
       runSource: input.options.runSource,
@@ -682,6 +714,50 @@ async function runCommand(options: CliOptions) {
   process.exitCode = passed ? 0 : 1;
 }
 
+function apiEndpoint(baseUrl: string, pathName: string) {
+  return `${baseUrl.replace(/\/+$/, '')}/${pathName.replace(/^\/+/, '')}`;
+}
+
+async function remoteRunCommand(options: CliOptions) {
+  if (!options.repo) {
+    throw new Error('--repo is required for remote runs.');
+  }
+  if (!options.branch) {
+    throw new Error('--ref or --branch is required for remote runs.');
+  }
+  if (!options.apiKey) {
+    throw new Error('--api-key is required for remote runs.');
+  }
+
+  const response = await postJson({
+    url: apiEndpoint(options.apiUrl, '/remote-runs'),
+    token: options.apiKey,
+    body: {
+      repository: options.repo,
+      ref: options.branch,
+      branch: options.branch,
+      commitSha: options.commitSha || undefined,
+      mode: options.mode,
+      intent: options.mode === 'exploratory' ? options.intent : undefined,
+      trigger: 'agent',
+      workflowId: options.workflowId,
+    },
+  });
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
+    return;
+  }
+
+  process.stdout.write('Layout remote run queued\n');
+  process.stdout.write(`Run: ${String(response.runId || response.id || '')}\n`);
+  if (response.runUrl || response.reportUrl) {
+    process.stdout.write(
+      `Report: ${String(response.runUrl || response.reportUrl)}\n`
+    );
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -701,6 +777,11 @@ async function main() {
 
   if (options.command === 'run') {
     await runCommand(options);
+    return;
+  }
+
+  if (options.command === 'remote-run') {
+    await remoteRunCommand(options);
     return;
   }
 

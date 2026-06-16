@@ -125,8 +125,10 @@ The process exits `0` on pass and `1` on failure, so the same command can run in
 trylayout init [options]
 trylayout mock-api [options]
 trylayout run --target-url <url> [options]
+trylayout remote run --repo <owner/repo> --ref <branch> [options]
 layout-qa mock-api [options]
 layout-qa run --target-url <url> [options]
+npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
 ```
 
 Options:
@@ -143,13 +145,17 @@ Options:
 --headed               Show the browser instead of running headless.
 --open                 Open the generated local HTML report after the run.
 --json                 Print machine-readable JSON.
+--api-url <url>        Layout API base URL. Defaults to https://trylayout.com/api/v1/qa.
+--api-key <key>        Layout organization API key for uploads and remote runs.
 --upload-url <url>     Upload completed run JSON/screenshots to Layout.
---upload-token <token> Project upload token for hosted Layout reports.
 --repo <name>          Repository full name, e.g. owner/repo.
 --branch <name>        Branch name for report metadata.
+--ref <name>           Branch/ref for a remote run. Defaults to --branch.
 --commit-sha <sha>     Commit SHA for report metadata.
 --pr-number <number>   Pull request number for report metadata.
 --run-source <value>   local or github_actions. Defaults from environment.
+--mode <value>         scripted or ai. Defaults to ai for remote run.
+--intent <text>        Natural-language intent for AI testing remote runs.
 --force                Overwrite an existing flow file during init.
 ```
 
@@ -384,13 +390,13 @@ The selected viewport is written to `result.json`, shown in the HTML report, and
 
 ## Hosted Reports
 
-The CLI is local-first. If you have a Layout project upload token, the same run can upload screenshots and report metadata to a hosted Layout report:
+The CLI is local-first. If you have a Layout organization API key, the same run can upload screenshots and report metadata to a hosted Layout report:
 
 ```bash
 npx @trylayout/qa run \
   --target-url http://localhost:5173 \
   --upload-url https://trylayout.com/api/v1/qa/uploads \
-  --upload-token "$LAYOUT_UPLOAD_TOKEN" \
+  --api-key "$LAYOUT_API_KEY" \
   --repo owner/repo \
   --branch "$BRANCH_NAME" \
   --commit-sha "$COMMIT_SHA"
@@ -399,16 +405,34 @@ npx @trylayout/qa run \
 Environment fallbacks:
 
 - `LAYOUT_UPLOAD_URL`
-- `LAYOUT_UPLOAD_TOKEN`
+- `LAYOUT_API_URL`
+- `LAYOUT_API_KEY`
 - `LAYOUT_REPOSITORY`
+- `LAYOUT_REF`
 - `LAYOUT_BRANCH`
 - `LAYOUT_COMMIT_SHA`
 - `LAYOUT_PR_NUMBER`
 - `LAYOUT_RUN_SOURCE`
+- `LAYOUT_INTENT`
 
 In GitHub Actions, the CLI also reads `GITHUB_REPOSITORY`, `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, `GITHUB_SHA`, `GITHUB_REF`, and `GITHUB_EVENT_PATH` when explicit flags are not provided.
 
-If either upload flag is provided, both `--upload-url` and `--upload-token` are required. Upload failures make the CLI exit nonzero.
+If `--upload-url` is provided, `--api-key` is required. Upload failures make the CLI exit nonzero.
+
+## Remote Runs
+
+The CLI can also ask Layout to run browser QA remotely against a connected repo/ref:
+
+```bash
+npx @trylayout/qa remote run \
+  --repo owner/repo \
+  --ref feature-branch \
+  --mode ai \
+  --intent "test the checkout recovery flow" \
+  --api-key "$LAYOUT_API_KEY"
+```
+
+Remote runs require the repo to be connected through the Layout GitHub App and to contain a valid `.layout/qa.json` launch contract.
 
 ## Scenarios
 
@@ -482,9 +506,9 @@ jobs:
       - run: npm ci
       - run: npx playwright install chromium
       - run: LAYOUT_QA=1 VITE_LAYOUT_QA=1 npm run dev -- --host 127.0.0.1 --port 5173 &
-      - run: npx @trylayout/qa run --target-url http://127.0.0.1:5173 --scenario happy_path --run-source github_actions --upload-url https://trylayout.com/api/v1/qa/uploads --upload-token "$LAYOUT_UPLOAD_TOKEN"
+      - run: npx @trylayout/qa run --target-url http://127.0.0.1:5173 --scenario happy_path --run-source github_actions --upload-url https://trylayout.com/api/v1/qa/uploads --api-key "$LAYOUT_API_KEY"
         env:
-          LAYOUT_UPLOAD_TOKEN: ${{ secrets.LAYOUT_UPLOAD_TOKEN }}
+          LAYOUT_API_KEY: ${{ secrets.LAYOUT_API_KEY }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
