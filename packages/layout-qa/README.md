@@ -7,6 +7,8 @@ Both commands are equivalent:
 ```bash
 npx layout-qa run --target-url http://localhost:5173 --scenario happy_path --open
 npx @trylayout/qa run --target-url http://localhost:5173 --scenario happy_path --open
+npx layout-qa mock-api --scenario happy_path
+npx @trylayout/qa mock-api --scenario happy_path
 ```
 
 Use the main README for full documentation:

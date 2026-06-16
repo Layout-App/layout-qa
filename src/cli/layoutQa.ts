@@ -12,6 +12,11 @@ import {
   resolveDefaultPath,
   starterFlowManifest,
 } from '../flows';
+import {
+  loadQaMockApiConfig,
+  startQaMockApiServer,
+  starterMockScenarios,
+} from '../mockApi';
 import {buildRunnerErrorResult, isQaRunPassed, runLayoutQaBrowser} from '../runner';
 import {openReport, writeArtifacts} from '../report';
 import {
@@ -27,6 +32,8 @@ type CliOptions = {
   targetUrl: string;
   scenario: string;
   flowsPath: string;
+  mockRoot: string;
+  port?: number;
   outDir: string;
   uploadUrl: string;
   uploadToken: string;
@@ -50,19 +57,25 @@ function printHelp() {
 
 Usage:
   trylayout init [options]
+  trylayout mock-api [options]
   trylayout run --target-url <url> [options]
+  layout-qa mock-api [options]
   layout-qa run --target-url <url> [options]
+  npx @trylayout/qa mock-api [options]
   npx @trylayout/qa run --target-url <url> [options]
   npx layout-qa run --target-url <url> [options]
 
 Commands:
   init                  Write a starter .layout/qa.json.
+  mock-api              Start a Layout mock API server from .layout/mocks.
   run                   Run browser QA and write a local HTML report.
 
 Options:
   --target-url <url>     URL of the running frontend to test.
   --scenario <name>      Scenario to activate. Defaults to happy_path.
   --flows <path>         Flow manifest path. Defaults to .layout/qa.json.
+  --mock-root <path>     Mock API root. Defaults from .layout/qa.json mockApi.root.
+  --port <number>        Port for mock-api. Defaults to an available local port.
   --out <path>           Artifact directory. Defaults to .layout/runs.
   --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
   --timeout <ms>         Browser run timeout. Defaults to LAYOUT_QA_TEST_TIMEOUT_MS or 60000.
@@ -119,6 +132,8 @@ function parseArgs(args: string[]): CliOptions {
   const command = args[0] && !args[0].startsWith('--') ? args[0] : 'help';
   const timeoutValue = readFlag(args, '--timeout');
   const parsedTimeoutMs = timeoutValue ? Number(timeoutValue) : undefined;
+  const portValue = readFlag(args, '--port');
+  const parsedPort = portValue ? Number(portValue) : undefined;
   const rawRunSource =
     readFlag(args, '--run-source') ||
     envValue('LAYOUT_RUN_SOURCE') ||
@@ -130,12 +145,17 @@ function parseArgs(args: string[]): CliOptions {
   ) {
     throw new Error('--timeout must be a positive number of milliseconds.');
   }
+  if (portValue && (!Number.isInteger(parsedPort) || Number(parsedPort) <= 0)) {
+    throw new Error('--port must be a positive integer.');
+  }
 
   return {
     command,
     targetUrl: readFlag(args, '--target-url'),
     scenario: readFlag(args, '--scenario') || 'happy_path',
     flowsPath: readFlag(args, '--flows'),
+    mockRoot: readFlag(args, '--mock-root'),
+    port: parsedPort,
     outDir: readFlag(args, '--out'),
     uploadUrl: readFlag(args, '--upload-url') || envValue('LAYOUT_UPLOAD_URL'),
     uploadToken:
@@ -188,7 +208,100 @@ async function initCommand(options: CliOptions) {
     manifestPath,
     `${JSON.stringify(starterFlowManifest(), null, 2)}\n`
   );
+  const layoutDir = path.dirname(manifestPath);
+  const layoutGitignorePath = path.join(layoutDir, '.gitignore');
+  if ((await exists(layoutGitignorePath)) && !options.force) {
+    // Preserve existing user ignore rules.
+  } else {
+    await fs.writeFile(
+      layoutGitignorePath,
+      [
+        '# Generated Layout QA reports can be recreated.',
+        'runs/',
+        '',
+      ].join('\n')
+    );
+  }
+  const mockRoot = path.resolve(
+    path.dirname(path.dirname(manifestPath)),
+    '.layout',
+    'mocks',
+    'scenarios'
+  );
+  await fs.mkdir(mockRoot, {recursive: true});
+  const scenarios = starterMockScenarios();
+  for (const [scenario, routes] of Object.entries(scenarios)) {
+    const scenarioPath = path.join(mockRoot, `${scenario}.json`);
+    if ((await exists(scenarioPath)) && !options.force) continue;
+    await fs.writeFile(scenarioPath, `${JSON.stringify(routes, null, 2)}\n`);
+  }
   process.stdout.write(`Created ${manifestPath}\n`);
+  process.stdout.write(`Created starter mock API scenarios in ${mockRoot}\n`);
+}
+
+async function mockApiCommand(options: CliOptions) {
+  const manifestPath = options.flowsPath
+    ? path.resolve(process.cwd(), options.flowsPath)
+    : await resolveDefaultPath(FLOW_MANIFEST_PATH);
+  const manifestConfig = await loadQaMockApiConfig({
+    manifestPath,
+    scenario: options.scenario,
+  });
+  const root = options.mockRoot
+    ? path.resolve(process.cwd(), options.mockRoot)
+    : manifestConfig?.root;
+
+  if (!root) {
+    throw new Error(
+      'No mock API root found. Add mockApi.root to .layout/qa.json or pass --mock-root.'
+    );
+  }
+
+  const server = await startQaMockApiServer({
+    root,
+    scenario: options.scenario || manifestConfig?.defaultScenario,
+    port: options.port,
+  });
+
+  if (options.json) {
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          url: server.url,
+          port: server.port,
+          scenario: server.scenario,
+          root: server.root,
+        },
+        null,
+        2
+      )}\n`
+    );
+  } else {
+    process.stdout.write(`Layout mock API listening at ${server.url}\n`);
+    process.stdout.write(`LAYOUT_MOCK_API_URL=${server.url}\n`);
+    process.stdout.write(`Scenario: ${server.scenario}\n`);
+    process.stdout.write(`Root: ${server.root}\n`);
+  }
+
+  const close = async () => {
+    await server.close().catch(() => {
+      // Best-effort shutdown.
+    });
+  };
+  process.once('SIGINT', () => {
+    close().finally(() => {
+      process.exit(0);
+    });
+  });
+  process.once('SIGTERM', () => {
+    close().finally(() => {
+      process.exit(0);
+    });
+  });
+
+  await new Promise(() => {
+    // Keep the mock API process alive until it receives a termination signal.
+  });
 }
 
 function statusIcon(passed: boolean) {
@@ -578,6 +691,11 @@ async function main() {
 
   if (options.command === 'init') {
     await initCommand(options);
+    return;
+  }
+
+  if (options.command === 'mock-api') {
+    await mockApiCommand(options);
     return;
   }
 

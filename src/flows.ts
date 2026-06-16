@@ -244,7 +244,20 @@ export async function loadFlows(input: {flowsPath: string; scenario: string}) {
 export function starterFlowManifest() {
   return {
     version: 1,
-    baseUrl: '$LAYOUT_BASE_URL',
+    app: {
+      root: '.',
+      install: 'npm ci',
+      start: 'npm run dev -- --host 127.0.0.1 --port $PORT',
+      env: {
+        LAYOUT_QA: '1',
+        VITE_LAYOUT_QA: '1',
+        VITE_API_BASE_URL: '$LAYOUT_MOCK_API_URL',
+      },
+    },
+    mockApi: {
+      root: '.layout/mocks',
+      defaultScenario: 'happy_path',
+    },
     viewports: ['desktop'],
     flows: [
       {

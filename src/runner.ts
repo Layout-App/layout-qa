@@ -174,8 +174,8 @@ function buildNextAction(input: {
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
         'Confirm the target is running with the Layout QA env flag set to 1.',
-        'Check that the app reads localStorage["layout.qa.scenario"] before API calls run.',
-        `Review ${FLOW_MANIFEST_PATH}, the Layout QA docs, and the API/auth response fixtures for missing handlers.`,
+        'Check that the app receives the active scenario and points API calls at the Layout mock API server when configured.',
+        `Review ${FLOW_MANIFEST_PATH}, .layout/mocks scenarios, the Layout QA docs, and auth fixtures for missing handlers.`,
       ],
     };
   }
@@ -210,7 +210,8 @@ function buildNextAction(input: {
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
         'Inspect the issues captured on this QA run.',
-        'Add or correct fixtures for unhandled frontend API/auth requests.',
+        'Add or correct .layout/mocks scenario responses for unhandled frontend API requests.',
+        'Check auth, SDKs, and safe-write guards that still require app-side QA flags.',
         'Fix app code that throws under the selected scenario, then rerun.',
       ],
     };
@@ -237,11 +238,12 @@ function buildNextAction(input: {
     detail:
       'The target loaded with the requested scenario and no basic browser issues were detected.',
     docsPath: FLOW_MANIFEST_PATH,
-    nextSteps: [
-      `Add route-specific Playwright-style flow steps to ${FLOW_MANIFEST_PATH} for the highest-value user path.`,
-      'Expand deterministic API/auth responses for any requests encountered by that flow.',
-      'Run the same flow across happy_path, empty, and error scenarios.',
-    ],
+      nextSteps: [
+        `Add route-specific Playwright-style flow steps to ${FLOW_MANIFEST_PATH} for the highest-value user path.`,
+        'Expand .layout/mocks scenario responses for any API requests encountered by that flow.',
+        'Keep auth and unsafe writes behind the narrowest possible QA-mode boundary.',
+        'Run the same flow across happy_path, empty, and error scenarios.',
+      ],
   };
 }
 
