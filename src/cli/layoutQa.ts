@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import {spawn, type ChildProcess} from 'child_process';
 import fs from 'fs/promises';
+import net from 'net';
 import path from 'path';
 import {request as httpRequest} from 'http';
 import {request as httpsRequest} from 'https';
@@ -21,6 +23,7 @@ import {buildRunnerErrorResult, isQaRunPassed, runLayoutQaBrowser} from '../runn
 import {openReport, writeArtifacts} from '../report';
 import {
   ArtifactSummary,
+  LoadedQaFlow,
   QaTestRunFlowResult,
   QaTestRunResult,
   QaViewport,
@@ -29,6 +32,8 @@ import {formatViewport, parseViewport} from '../viewports';
 
 type CliOptions = {
   command: string;
+  intentText: string;
+  flowNames: string[];
   targetUrl: string;
   scenario: string;
   flowsPath: string;
@@ -50,6 +55,9 @@ type CliOptions = {
   viewport: QaViewport;
   timeoutMs?: number;
   headed: boolean;
+  startApp: boolean;
+  serveMocks: boolean;
+  skipInstall: boolean;
   json: boolean;
   open: boolean;
   force: boolean;
@@ -61,11 +69,17 @@ function printHelp() {
 
 Usage:
   trylayout init [options]
+  trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
+  trylayout check [flow_id ...] [options]
   trylayout mock-api [options]
   trylayout run --target-url <url> [options]
   trylayout remote run --repo <owner/repo> --ref <branch> [options]
+  layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
+  layout-qa check [flow_id ...] [options]
   layout-qa mock-api [options]
   layout-qa run --target-url <url> [options]
+  npx @trylayout/qa test "intent" --repo <owner/repo> --ref <branch> [options]
+  npx @trylayout/qa check [flow_id ...] [options]
   npx @trylayout/qa mock-api [options]
   npx @trylayout/qa run --target-url <url> [options]
   npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
@@ -73,6 +87,8 @@ Usage:
 
 Commands:
   init                  Write a starter .layout/qa.json.
+  test                  Ask Layout to run AI browser QA remotely.
+  check                 Run local/CI scripted manifest checks.
   mock-api              Start a Layout mock API server from .layout/mocks.
   run                   Run browser QA and write a local HTML report.
   remote run            Ask Layout to run browser QA against a repo/ref.
@@ -102,6 +118,9 @@ Options:
   --mode <value>         scripted or ai. Defaults to ai for remote run.
   --intent <text>        Natural-language intent for AI testing remote runs.
   --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
+  --start-app            Start the app from .layout/qa.json before local checks.
+  --serve-mocks          Start mock API before local checks. Automatic with --start-app.
+  --skip-install         With --start-app, skip app.install.
   --force                Overwrite an existing flow file during init.
   --help                 Show this help.
 `);
@@ -119,6 +138,43 @@ function hasFlag(args: string[], name: string) {
 
 function envValue(name: string) {
   return process.env[name] || '';
+}
+
+const VALUE_FLAGS = new Set([
+  '--target-url',
+  '--scenario',
+  '--flows',
+  '--mock-root',
+  '--port',
+  '--out',
+  '--viewport',
+  '--timeout',
+  '--api-url',
+  '--api-key',
+  '--upload-url',
+  '--repo',
+  '--branch',
+  '--ref',
+  '--commit-sha',
+  '--pr-number',
+  '--run-id',
+  '--run-source',
+  '--mode',
+  '--intent',
+  '--workflow-id',
+]);
+
+function positionalArgs(args: string[], startIndex: number) {
+  const positional: string[] = [];
+  for (let index = startIndex; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg.startsWith('--')) {
+      if (VALUE_FLAGS.has(arg)) index += 1;
+      continue;
+    }
+    positional.push(arg);
+  }
+  return positional;
 }
 
 async function githubEventPullRequestNumber() {
@@ -144,6 +200,7 @@ function parseArgs(args: string[]): CliOptions {
   const firstCommand = args[0] && !args[0].startsWith('--') ? args[0] : 'help';
   const command =
     firstCommand === 'remote' && args[1] === 'run' ? 'remote-run' : firstCommand;
+  const positional = positionalArgs(args, command === 'remote-run' ? 2 : 1);
   const timeoutValue = readFlag(args, '--timeout');
   const parsedTimeoutMs = timeoutValue ? Number(timeoutValue) : undefined;
   const portValue = readFlag(args, '--port');
@@ -165,6 +222,11 @@ function parseArgs(args: string[]): CliOptions {
 
   return {
     command,
+    intentText:
+      command === 'test'
+        ? readFlag(args, '--intent') || positional[0] || envValue('LAYOUT_INTENT')
+        : readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
+    flowNames: command === 'check' ? positional : [],
     targetUrl: readFlag(args, '--target-url'),
     scenario: readFlag(args, '--scenario') || 'happy_path',
     flowsPath: readFlag(args, '--flows'),
@@ -199,9 +261,12 @@ function parseArgs(args: string[]): CliOptions {
       inferGithubPrNumber(),
     runId: readFlag(args, '--run-id') || envValue('LAYOUT_RUN_ID'),
     runSource: rawRunSource === 'github_actions' ? 'github_actions' : 'local',
-    mode: /^(scripted|checks?)$/i.test(readFlag(args, '--mode'))
-      ? 'scripted'
-      : 'exploratory',
+    mode:
+      command === 'test'
+        ? 'exploratory'
+        : /^(scripted|checks?)$/i.test(readFlag(args, '--mode'))
+          ? 'scripted'
+          : 'exploratory',
     intent: readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
     workflowId:
       readFlag(args, '--workflow-id') ||
@@ -210,6 +275,9 @@ function parseArgs(args: string[]): CliOptions {
     viewport: parseViewport(readFlag(args, '--viewport')),
     timeoutMs: parsedTimeoutMs,
     headed: hasFlag(args, '--headed'),
+    startApp: hasFlag(args, '--start-app'),
+    serveMocks: hasFlag(args, '--serve-mocks'),
+    skipInstall: hasFlag(args, '--skip-install'),
     json: hasFlag(args, '--json'),
     open: hasFlag(args, '--open'),
     force: hasFlag(args, '--force'),
@@ -222,6 +290,291 @@ async function exists(filePath: string) {
     .access(filePath)
     .then(() => true)
     .catch(() => false);
+}
+
+type AppConfig = {
+  root: string;
+  install?: string;
+  start: string;
+  healthUrl?: string;
+  env: Record<string, string>;
+};
+
+type LocalCheckSession = {
+  targetUrl: string;
+  close: () => Promise<void>;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function stringRecord(value: unknown) {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => {
+      return typeof entry[1] === 'string';
+    })
+  );
+}
+
+function repoRootFromManifest(manifestPath: string) {
+  const manifestDir = path.dirname(path.resolve(manifestPath));
+  return path.basename(manifestDir) === '.layout'
+    ? path.dirname(manifestDir)
+    : manifestDir;
+}
+
+async function loadAppConfig(manifestPath: string) {
+  const content = await fs.readFile(manifestPath, 'utf8').catch(error => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw error;
+  });
+  if (!content) return null;
+
+  const manifest = JSON.parse(content) as Record<string, unknown>;
+  if (!isRecord(manifest.app)) return null;
+
+  const app = manifest.app;
+  const start = typeof app.start === 'string' ? app.start.trim() : '';
+  if (!start) return null;
+
+  return {
+    root: typeof app.root === 'string' && app.root.trim() ? app.root.trim() : '.',
+    install:
+      typeof app.install === 'string' && app.install.trim()
+        ? app.install.trim()
+        : undefined,
+    start,
+    healthUrl:
+      typeof app.healthUrl === 'string' && app.healthUrl.trim()
+        ? app.healthUrl.trim()
+        : undefined,
+    env: stringRecord(app.env),
+  } satisfies AppConfig;
+}
+
+function expandVariables(value: string, variables: Record<string, string>) {
+  return Object.entries(variables).reduce(
+    (expanded, [key, variableValue]) =>
+      expanded.split(`$${key}`).join(variableValue),
+    value
+  );
+}
+
+function expandEnv(
+  env: Record<string, string>,
+  variables: Record<string, string>
+) {
+  return Object.fromEntries(
+    Object.entries(env).map(([key, value]) => [key, expandVariables(value, variables)])
+  );
+}
+
+function getAvailablePort() {
+  return new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Could not allocate port.')));
+        return;
+      }
+      const port = address.port;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+function runShellCommand(input: {
+  command: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  silent?: boolean;
+}) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(input.command, {
+      cwd: input.cwd,
+      env: input.env,
+      shell: true,
+      stdio: input.silent ? 'ignore' : 'inherit',
+    });
+    child.on('error', reject);
+    child.on('exit', code => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Command failed (${code ?? 'signal'}): ${input.command}`));
+    });
+  });
+}
+
+function requestOk(url: string) {
+  return new Promise<boolean>(resolve => {
+    const target = new URL(url);
+    const request = target.protocol === 'https:' ? httpsRequest : httpRequest;
+    const req = request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: 'GET',
+        timeout: 2500,
+      },
+      response => {
+        response.resume();
+        resolve(Boolean(response.statusCode && response.statusCode < 500));
+      }
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.end();
+  });
+}
+
+async function waitForUrl(url: string, timeoutMs: number) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await requestOk(url)) return;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw new Error(`Timed out waiting for app health URL: ${url}`);
+}
+
+async function stopChild(child: ChildProcess | undefined) {
+  if (!child || child.exitCode !== null) return;
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve();
+    }, 5000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill('SIGTERM');
+  });
+}
+
+async function startLocalCheckSession(input: {
+  options: CliOptions;
+  manifestPath: string;
+}) {
+  let mockServer:
+    | Awaited<ReturnType<typeof startQaMockApiServer>>
+    | undefined;
+  let appProcess: ChildProcess | undefined;
+
+  const close = async () => {
+    await stopChild(appProcess);
+    await mockServer?.close().catch(() => {
+      // Best-effort shutdown.
+    });
+  };
+
+  const shouldStartMocks = input.options.serveMocks || input.options.startApp;
+  const mockConfig = shouldStartMocks
+    ? await loadQaMockApiConfig({
+        manifestPath: input.manifestPath,
+        scenario: input.options.scenario,
+      })
+    : null;
+
+  if (mockConfig) {
+    mockServer = await startQaMockApiServer({
+      root: mockConfig.root,
+      scenario: input.options.scenario || mockConfig.defaultScenario,
+      port: input.options.port,
+    });
+    if (!input.options.json) {
+      process.stdout.write(`Layout mock API listening at ${mockServer.url}\n`);
+    }
+  } else if (input.options.serveMocks) {
+    throw new Error(
+      'No mock API root found. Add mockApi.root to .layout/qa.json or omit --serve-mocks.'
+    );
+  }
+
+  if (!input.options.startApp) {
+    if (!input.options.targetUrl) {
+      await close();
+      throw new Error('--target-url is required unless --start-app is set.');
+    }
+    return {
+      targetUrl: input.options.targetUrl,
+      close,
+    } satisfies LocalCheckSession;
+  }
+
+  const app = await loadAppConfig(input.manifestPath);
+  if (!app) {
+    await close();
+    throw new Error(
+      '--start-app requires an app.start block in .layout/qa.json.'
+    );
+  }
+
+  const port = await getAvailablePort();
+  const variables = {
+    PORT: String(port),
+    LAYOUT_MOCK_API_URL:
+      mockServer?.url || process.env.LAYOUT_MOCK_API_URL || '',
+  };
+  const appEnv = expandEnv(app.env, variables);
+  const missingMockUrl = Object.values(app.env).some(value =>
+    value.includes('$LAYOUT_MOCK_API_URL')
+  );
+  if (missingMockUrl && !variables.LAYOUT_MOCK_API_URL) {
+    await close();
+    throw new Error(
+      'app.env references $LAYOUT_MOCK_API_URL, but no mock API server is configured.'
+    );
+  }
+
+  const appRoot = path.resolve(repoRootFromManifest(input.manifestPath), app.root);
+  const env = {
+    ...process.env,
+    ...appEnv,
+    PORT: String(port),
+    LAYOUT_MOCK_API_URL: variables.LAYOUT_MOCK_API_URL,
+  };
+
+  if (app.install && !input.options.skipInstall) {
+    await runShellCommand({
+      command: app.install,
+      cwd: appRoot,
+      env,
+      silent: input.options.json,
+    });
+  }
+
+  const startCommand = expandVariables(app.start, variables);
+  const healthUrl = expandVariables(
+    app.healthUrl || `http://127.0.0.1:${port}/`,
+    variables
+  );
+  appProcess = spawn(startCommand, {
+    cwd: appRoot,
+    env,
+    shell: true,
+    stdio: input.options.json ? 'ignore' : 'inherit',
+  });
+  appProcess.on('error', error => {
+    process.stderr.write(`Layout app start failed: ${error.message}\n`);
+  });
+
+  await waitForUrl(healthUrl, input.options.timeoutMs || getTestTimeoutMs());
+
+  return {
+    targetUrl: new URL(healthUrl).origin,
+    close,
+  } satisfies LocalCheckSession;
 }
 
 async function initCommand(options: CliOptions) {
@@ -513,6 +866,36 @@ function combineFlowRunResults(results: QaTestRunResult[]) {
   } satisfies QaTestRunResult;
 }
 
+function normalizeFlowName(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+}
+
+function filterFlows(
+  flows: LoadedQaFlow[],
+  requestedFlowNames: string[],
+  manifestPath: string
+) {
+  if (requestedFlowNames.length === 0) return flows;
+
+  const requested = new Set(requestedFlowNames.map(normalizeFlowName));
+  const selected = flows.filter(flow => {
+    return (
+      requested.has(normalizeFlowName(flow.id)) ||
+      requested.has(normalizeFlowName(flow.name))
+    );
+  });
+
+  if (selected.length === 0) {
+    throw new Error(
+      `No matching flows found in ${manifestPath}. Available flows: ${flows
+        .map(flow => flow.id)
+        .join(', ')}.`
+    );
+  }
+
+  return selected;
+}
+
 function readFileAsDataUrl(filePath: string) {
   return fs.readFile(filePath).then(buffer => {
     const ext = path.extname(filePath).toLowerCase();
@@ -624,47 +1007,48 @@ async function uploadRun(input: {
   });
 }
 
-async function runCommand(options: CliOptions) {
-  if (!options.targetUrl) {
-    throw new Error('--target-url is required.');
-  }
-
+async function runBrowserChecks(input: {options: CliOptions; targetUrl: string}) {
   const {flows, manifestPath, manifestFound} = await loadFlows({
-    flowsPath: options.flowsPath,
-    scenario: options.scenario,
+    flowsPath: input.options.flowsPath,
+    scenario: input.options.scenario,
   });
+  const selectedFlows = filterFlows(
+    flows,
+    input.options.flowNames,
+    manifestPath
+  );
   const results: QaTestRunResult[] = [];
 
-  for (const flow of flows) {
+  for (const flow of selectedFlows) {
     try {
       results.push(
         await runLayoutQaBrowser({
-          targetUrl: options.targetUrl,
-          scenario: options.scenario,
+          targetUrl: input.targetUrl,
+          scenario: input.options.scenario,
           flow,
-          timeoutMs: options.timeoutMs || getTestTimeoutMs(),
-          headless: !options.headed,
-          viewport: options.viewport,
+          timeoutMs: input.options.timeoutMs || getTestTimeoutMs(),
+          headless: !input.options.headed,
+          viewport: input.options.viewport,
         })
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      results.push(buildRunnerErrorResult(message, options.viewport));
+      results.push(buildRunnerErrorResult(message, input.options.viewport));
     }
   }
   const result = combineFlowRunResults(results);
 
   const artifacts = await writeArtifacts({
-    outDir: options.outDir,
-    scenario: options.scenario,
-    targetUrl: options.targetUrl,
+    outDir: input.options.outDir,
+    scenario: input.options.scenario,
+    targetUrl: input.targetUrl,
     manifestPath,
     manifestFound,
     result,
   });
   const passed = isQaRunPassed(result);
   const uploadResponse = await uploadRun({
-    options,
+    options: {...input.options, targetUrl: input.targetUrl},
     result,
     artifacts,
     manifestPath,
@@ -672,14 +1056,14 @@ async function runCommand(options: CliOptions) {
     passed,
   });
 
-  if (options.json) {
+  if (input.options.json) {
     process.stdout.write(
       `${JSON.stringify(
         {
           status: passed ? 'passed' : 'failed',
-          scenario: options.scenario,
-          targetUrl: options.targetUrl,
-          viewport: options.viewport,
+          scenario: input.options.scenario,
+          targetUrl: input.targetUrl,
+          viewport: input.options.viewport,
           manifestPath,
           manifestFound,
           artifacts,
@@ -693,19 +1077,19 @@ async function runCommand(options: CliOptions) {
   } else {
     printHumanSummary({
       result,
-      scenario: options.scenario,
-      targetUrl: options.targetUrl,
+      scenario: input.options.scenario,
+      targetUrl: input.targetUrl,
       manifestPath,
       manifestFound,
       artifacts,
     });
   }
 
-  if (options.open) {
+  if (input.options.open) {
     await openReport(artifacts.reportPath);
   }
 
-  if (uploadResponse && !options.json) {
+  if (uploadResponse && !input.options.json) {
     process.stdout.write(
       `Uploaded: ${String(uploadResponse.reportUrl || uploadResponse.runId)}\n`
     );
@@ -714,11 +1098,48 @@ async function runCommand(options: CliOptions) {
   process.exitCode = passed ? 0 : 1;
 }
 
+async function runCommand(options: CliOptions) {
+  if (!options.targetUrl) {
+    throw new Error('--target-url is required.');
+  }
+
+  await runBrowserChecks({options, targetUrl: options.targetUrl});
+}
+
+async function checkCommand(options: CliOptions) {
+  const manifestPath = options.flowsPath
+    ? path.resolve(process.cwd(), options.flowsPath)
+    : await resolveDefaultPath(FLOW_MANIFEST_PATH);
+  const session = await startLocalCheckSession({options, manifestPath});
+  const signalHandler = () => {
+    session.close().finally(() => {
+      process.exit(130);
+    });
+  };
+  process.once('SIGINT', signalHandler);
+  process.once('SIGTERM', signalHandler);
+
+  try {
+    await runBrowserChecks({options, targetUrl: session.targetUrl});
+  } finally {
+    process.off('SIGINT', signalHandler);
+    process.off('SIGTERM', signalHandler);
+    await session.close();
+  }
+}
+
 function apiEndpoint(baseUrl: string, pathName: string) {
   return `${baseUrl.replace(/\/+$/, '')}/${pathName.replace(/^\/+/, '')}`;
 }
 
 async function remoteRunCommand(options: CliOptions) {
+  const intent =
+    options.command === 'test'
+      ? options.intentText.trim()
+      : options.intentText.trim() || options.intent.trim();
+  if (options.command === 'test' && !intent) {
+    throw new Error('trylayout test requires an intent, e.g. trylayout test "test checkout recovery".');
+  }
   if (!options.repo) {
     throw new Error('--repo is required for remote runs.');
   }
@@ -737,8 +1158,11 @@ async function remoteRunCommand(options: CliOptions) {
       ref: options.branch,
       branch: options.branch,
       commitSha: options.commitSha || undefined,
-      mode: options.mode,
-      intent: options.mode === 'exploratory' ? options.intent : undefined,
+      mode: options.command === 'test' ? 'exploratory' : options.mode,
+      intent:
+        options.command === 'test' || options.mode === 'exploratory'
+          ? intent
+          : undefined,
       trigger: 'agent',
       workflowId: options.workflowId,
     },
@@ -775,12 +1199,17 @@ async function main() {
     return;
   }
 
+  if (options.command === 'check') {
+    await checkCommand(options);
+    return;
+  }
+
   if (options.command === 'run') {
     await runCommand(options);
     return;
   }
 
-  if (options.command === 'remote-run') {
+  if (options.command === 'remote-run' || options.command === 'test') {
     await remoteRunCommand(options);
     return;
   }

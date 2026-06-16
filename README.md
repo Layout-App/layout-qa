@@ -10,12 +10,13 @@ The core loop is intentionally local:
 
 ```bash
 npx @trylayout/qa init
-npx @trylayout/qa mock-api --scenario happy_path
-npx @trylayout/qa run --target-url http://localhost:5173 --scenario happy_path --open
-npx @trylayout/qa run --target-url http://localhost:5173 --scenario happy_path --viewport 390x844 --open
+npx @trylayout/qa check --start-app --skip-install --open
+npx @trylayout/qa check smoke --target-url http://localhost:5173 --scenario happy_path --open
+npx @trylayout/qa test "test checkout recovery" --repo owner/repo --ref feature-branch
 ```
 
-No account, upload, hosted service, or external docs are required.
+Local scripted checks require no account, hosted service, or external docs.
+Hosted uploads and remote AI tests require a Layout organization API key.
 
 ## Example Report
 
@@ -30,8 +31,8 @@ Package names:
 These commands are equivalent:
 
 ```bash
-npx @trylayout/qa run --target-url http://localhost:5173 --scenario happy_path --open
-npx layout-qa run --target-url http://localhost:5173 --scenario happy_path --open
+npx @trylayout/qa check --target-url http://localhost:5173 --scenario happy_path --open
+npx layout-qa check --target-url http://localhost:5173 --scenario happy_path --open
 ```
 
 ## Why This Exists
@@ -52,20 +53,20 @@ The goal is not to replace Playwright. The goal is to make the browser QA loop s
 Use it directly with `npx`:
 
 ```bash
-npx @trylayout/qa run --target-url http://localhost:5173
+npx @trylayout/qa check --target-url http://localhost:5173
 ```
 
 The package is also available under the unscoped alias `layout-qa` for agents and tools that infer the package name from this repository:
 
 ```bash
-npx layout-qa run --target-url http://localhost:5173
+npx layout-qa check --target-url http://localhost:5173
 ```
 
 Or install it in a project:
 
 ```bash
 npm install --save-dev @trylayout/qa
-npx trylayout run --target-url http://localhost:5173
+npx trylayout check --target-url http://localhost:5173
 ```
 
 The package uses Playwright. If your environment does not already have Chromium installed for Playwright, run:
@@ -100,11 +101,22 @@ npm run dev
 Run a scenario:
 
 ```bash
-npx @trylayout/qa run \
+npx @trylayout/qa check \
   --target-url http://localhost:5173 \
   --scenario happy_path \
   --open
 ```
+
+If `.layout/qa.json` contains an `app` block, run the whole local scripted
+session from one command:
+
+```bash
+npx @trylayout/qa check --start-app --skip-install --open
+```
+
+That starts the mock API when `mockApi` is configured, starts the app with the
+manifest `app.start` command, runs manifest flows, writes the report, and shuts
+the child processes down when finished or interrupted.
 
 Each run writes:
 
@@ -123,12 +135,24 @@ The process exits `0` on pass and `1` on failure, so the same command can run in
 
 ```text
 trylayout init [options]
+trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
+trylayout check [flow_id ...] [options]
 trylayout mock-api [options]
 trylayout run --target-url <url> [options]
 trylayout remote run --repo <owner/repo> --ref <branch> [options]
+layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
+layout-qa check [flow_id ...] [options]
 layout-qa mock-api [options]
 layout-qa run --target-url <url> [options]
+npx @trylayout/qa test "intent" --repo <owner/repo> --ref <branch> [options]
+npx @trylayout/qa check [flow_id ...] [options]
+npx @trylayout/qa mock-api [options]
+npx @trylayout/qa run --target-url <url> [options]
 npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
+npx layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
+npx layout-qa check [flow_id ...] [options]
+npx layout-qa mock-api [options]
+npx layout-qa run --target-url <url> [options]
 ```
 
 Options:
@@ -141,7 +165,7 @@ Options:
 --port <number>        Port for mock-api. Defaults to an available local port.
 --out <path>           Artifact directory. Defaults to .layout/runs.
 --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
---timeout <ms>         Browser run timeout. Defaults to 60000.
+--timeout <ms>         Browser run timeout. Defaults to LAYOUT_QA_TEST_TIMEOUT_MS or 60000.
 --headed               Show the browser instead of running headless.
 --open                 Open the generated local HTML report after the run.
 --json                 Print machine-readable JSON.
@@ -153,9 +177,13 @@ Options:
 --ref <name>           Branch/ref for a remote run. Defaults to --branch.
 --commit-sha <sha>     Commit SHA for report metadata.
 --pr-number <number>   Pull request number for report metadata.
+--run-id <id>          Existing Layout run id to update after workflow_dispatch.
 --run-source <value>   local or github_actions. Defaults from environment.
 --mode <value>         scripted or ai. Defaults to ai for remote run.
 --intent <text>        Natural-language intent for AI testing remote runs.
+--start-app            Start the app from .layout/qa.json before local checks.
+--serve-mocks          Start mock API before local checks. Automatic with --start-app.
+--skip-install         With --start-app, skip app.install.
 --force                Overwrite an existing flow file during init.
 ```
 
@@ -374,10 +402,10 @@ Examples:
 The runner defaults to the desktop viewport, `1280x900`. Use `--viewport` to run the same flow at a preset or exact size:
 
 ```bash
-npx @trylayout/qa run --target-url http://localhost:5173 --viewport desktop
-npx @trylayout/qa run --target-url http://localhost:5173 --viewport tablet
-npx @trylayout/qa run --target-url http://localhost:5173 --viewport mobile
-npx @trylayout/qa run --target-url http://localhost:5173 --viewport 390x844
+npx @trylayout/qa check --target-url http://localhost:5173 --viewport desktop
+npx @trylayout/qa check --target-url http://localhost:5173 --viewport tablet
+npx @trylayout/qa check --target-url http://localhost:5173 --viewport mobile
+npx @trylayout/qa check --target-url http://localhost:5173 --viewport 390x844
 ```
 
 Presets:
@@ -393,7 +421,7 @@ The selected viewport is written to `result.json`, shown in the HTML report, and
 The CLI is local-first. If you have a Layout organization API key, the same run can upload screenshots and report metadata to a hosted Layout report:
 
 ```bash
-npx @trylayout/qa run \
+npx @trylayout/qa check \
   --target-url http://localhost:5173 \
   --upload-url https://trylayout.com/api/v1/qa/uploads \
   --api-key "$LAYOUT_API_KEY" \
@@ -419,20 +447,20 @@ In GitHub Actions, the CLI also reads `GITHUB_REPOSITORY`, `GITHUB_HEAD_REF`, `G
 
 If `--upload-url` is provided, `--api-key` is required. Upload failures make the CLI exit nonzero.
 
-## Remote Runs
+## Remote AI Testing
 
-The CLI can also ask Layout to run browser QA remotely against a connected repo/ref:
+The main hosted product asks Layout to run AI browser QA remotely against a
+connected repo/ref:
 
 ```bash
-npx @trylayout/qa remote run \
+npx @trylayout/qa test "test the checkout recovery flow" \
   --repo owner/repo \
   --ref feature-branch \
-  --mode ai \
-  --intent "test the checkout recovery flow" \
   --api-key "$LAYOUT_API_KEY"
 ```
 
-Remote runs require the repo to be connected through the Layout GitHub App and to contain a valid `.layout/qa.json` launch contract.
+Remote AI tests require the repo to be connected through the Layout GitHub App
+and to contain a valid `.layout/qa.json` launch contract.
 
 ## Scenarios
 
@@ -459,11 +487,11 @@ Paste this into your coding agent inside the frontend repo:
 Set up Layout QA for this web app.
 
 Goal:
-Create a local-only browser QA loop that an agent can run while changing frontend code.
+Create a browser QA loop that works locally and can also be used by Layout remote branch runs.
 
 Rules:
 - Use the Layout mock API server from @trylayout/qa for backend responses.
-- Do not require a hosted Layout service.
+- Do not require a hosted Layout service for local scripted checks.
 - Keep all deterministic response fixtures in .layout/mocks/scenarios.
 - Gate auth, SDKs, and unsafe writes behind a QA env flag such as LAYOUT_QA=1, VITE_LAYOUT_QA=1, NEXT_PUBLIC_LAYOUT_QA=1, or the framework-appropriate equivalent.
 - Point the frontend API base URL at $LAYOUT_MOCK_API_URL in QA mode.
@@ -481,9 +509,9 @@ Implementation:
 
 Run:
 npx @trylayout/qa mock-api --scenario happy_path --port 4311
-npx @trylayout/qa run --target-url <local app url> --scenario happy_path --open
-npx @trylayout/qa run --target-url <local app url> --scenario empty --open
-npx @trylayout/qa run --target-url <local app url> --scenario error --open
+npx @trylayout/qa check --target-url <local app url> --scenario happy_path --open
+npx @trylayout/qa check --target-url <local app url> --scenario empty --open
+npx @trylayout/qa check --target-url <local app url> --scenario error --open
 ```
 
 ## CI Example
@@ -505,8 +533,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install chromium
-      - run: LAYOUT_QA=1 VITE_LAYOUT_QA=1 npm run dev -- --host 127.0.0.1 --port 5173 &
-      - run: npx @trylayout/qa run --target-url http://127.0.0.1:5173 --scenario happy_path --run-source github_actions --upload-url https://trylayout.com/api/v1/qa/uploads --api-key "$LAYOUT_API_KEY"
+      - run: npx @trylayout/qa check --start-app --scenario happy_path --run-source github_actions --upload-url https://trylayout.com/api/v1/qa/uploads --api-key "$LAYOUT_API_KEY"
         env:
           LAYOUT_API_KEY: ${{ secrets.LAYOUT_API_KEY }}
       - uses: actions/upload-artifact@v4
@@ -525,11 +552,12 @@ This package is intentionally small:
 - It does support deterministic scenario switching.
 - It does support explicit viewport sizing.
 - It does support lightweight layout assertions.
-- It does not build or host your app.
-- It does not upload results.
-- It does not perform AI review by itself.
+- It does support manifest-driven local app startup with `check --start-app`.
+- It does support hosted uploads and remote AI test requests when given a Layout API key.
+- It does not perform AI review locally by itself.
 
-Those hosted/reporting layers can be added later without changing the local protocol.
+The hosted Layout service owns remote AI browser testing and shared run reports;
+the package stays the local/CI runner and remote-test trigger.
 
 ## Feedback
 
