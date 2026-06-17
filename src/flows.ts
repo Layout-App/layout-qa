@@ -193,16 +193,6 @@ export async function resolveDefaultPath(defaultPath: string) {
   const cwdPath = path.resolve(process.cwd(), defaultPath);
   if (await exists(cwdPath)) return cwdPath;
 
-  const parentPath = path.resolve(process.cwd(), '..', defaultPath);
-  if (await exists(parentPath)) return parentPath;
-
-  if (defaultPath === '.layout' || defaultPath.startsWith('.layout/')) {
-    const cwdLayoutDir = path.resolve(process.cwd(), '.layout');
-    const parentLayoutDir = path.resolve(process.cwd(), '..', '.layout');
-    if (await exists(cwdLayoutDir)) return cwdPath;
-    if (await exists(parentLayoutDir)) return parentPath;
-  }
-
   return cwdPath;
 }
 

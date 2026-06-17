@@ -193,7 +193,9 @@ Options:
 
 ## Flow Manifest
 
-Default path: `.layout/qa.json`.
+Default path: `.layout/qa.json` in the current working directory. In monorepos,
+run Layout QA from the package/app directory you want to test, or pass
+`--flows <path>` explicitly for a different manifest.
 
 ```json
 {

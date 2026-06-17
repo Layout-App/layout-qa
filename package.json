@@ -1,6 +1,6 @@
 {
   "name": "@trylayout/qa",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Local browser QA runner and HTML reports for AI-built frontends.",
   "license": "MIT",
   "author": "Layout",
@@ -39,6 +39,7 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
+    "test": "npm run build && node tests/monorepo-resolution.test.js",
     "publish:alias": "cd packages/layout-qa && npm publish --access public",
     "prepack": "npm run build"
   },
