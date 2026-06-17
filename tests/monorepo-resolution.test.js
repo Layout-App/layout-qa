@@ -97,6 +97,30 @@ async function main() {
         path.dirname(path.dirname(artifacts.runDir)),
         path.join(childCwd, '.layout')
       );
+      const layoutGitignore = await fs.readFile(
+        path.join(childCwd, '.layout', '.gitignore'),
+        'utf8'
+      );
+      assert.match(layoutGitignore, /^runs\/$/m);
+      assert.match(layoutGitignore, /^\*runs\/$/m);
+      assert.match(layoutGitignore, /^manual-qa-\*\/$/m);
+
+      const customArtifacts = await writeArtifacts({
+        outDir: '.layout/landing-runs',
+        scenario: 'happy_path',
+        targetUrl: 'http://127.0.0.1:5174/',
+        manifestPath: loaded.manifestPath,
+        manifestFound: loaded.manifestFound,
+        result: {
+          checks: [],
+          issues: [],
+          viewport: {id: 'desktop', width: 1440, height: 900},
+        },
+      });
+      assert.equal(
+        path.dirname(path.dirname(customArtifacts.runDir)),
+        path.join(childCwd, '.layout')
+      );
     });
   } finally {
     await fs.rm(root, {recursive: true, force: true});

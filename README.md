@@ -303,14 +303,21 @@ Do not commit generated run artifacts:
 
 ```text
 .layout/runs/
+.layout/*runs/
+**/.layout/runs/
+**/.layout/*runs/
+**/.layout/manual-qa-*/
 ```
 
 The mock scenario files should contain fake deterministic data only. Do not put
 secrets, production tokens, real customer data, or one-off local machine paths in
 `.layout/mocks`.
 
-`layout-qa init` writes `.layout/.gitignore` with `runs/` ignored so reports stay
-local while the manifest and mock scenarios remain reviewable in pull requests.
+`layout-qa init` writes `.layout/.gitignore` with generated report directories
+ignored so reports stay local while the manifest and mock scenarios remain
+reviewable in pull requests. Local report commands also update the nearest
+`.layout/.gitignore` automatically when they write artifacts under a `.layout`
+directory.
 
 If a Layout-managed run drafts temporary flows from natural-language intent,
 those draft edits happen only inside Layout's temporary checkout. Promote useful

@@ -15,6 +15,7 @@ import {
   resolveDefaultPath,
   starterFlowManifest,
 } from '../flows';
+import {ensureLayoutGitignore} from '../gitignore';
 import {
   loadQaMockApiConfig,
   startQaMockApiServer,
@@ -632,19 +633,7 @@ async function initCommand(options: CliOptions) {
     `${JSON.stringify(starterFlowManifest(), null, 2)}\n`
   );
   const layoutDir = path.dirname(manifestPath);
-  const layoutGitignorePath = path.join(layoutDir, '.gitignore');
-  if ((await exists(layoutGitignorePath)) && !options.force) {
-    // Preserve existing user ignore rules.
-  } else {
-    await fs.writeFile(
-      layoutGitignorePath,
-      [
-        '# Generated Layout QA reports can be recreated.',
-        'runs/',
-        '',
-      ].join('\n')
-    );
-  }
+  const layoutGitignorePath = await ensureLayoutGitignore(layoutDir);
   const mockRoot = path.resolve(
     path.dirname(path.dirname(manifestPath)),
     '.layout',
@@ -660,6 +649,9 @@ async function initCommand(options: CliOptions) {
   }
   process.stdout.write(`Created ${manifestPath}\n`);
   process.stdout.write(`Created starter mock API scenarios in ${mockRoot}\n`);
+  process.stdout.write(
+    `Updated ${layoutGitignorePath} to ignore generated Layout artifacts\n`
+  );
 }
 
 async function installBrowsersCommand(options: CliOptions) {

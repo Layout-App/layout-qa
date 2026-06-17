@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import {spawn} from 'child_process';
 import {resolveDefaultPath} from './flows';
+import {ensureLayoutGitignore, nearestLayoutDir} from './gitignore';
 import {
   ArtifactSummary,
   QaTestRunFlowResult,
@@ -470,6 +471,10 @@ export async function writeArtifacts(input: {
   const outRoot = input.outDir
     ? path.resolve(process.cwd(), input.outDir)
     : await resolveDefaultPath('.layout/runs');
+  const layoutDir = nearestLayoutDir(outRoot);
+  if (layoutDir) {
+    await ensureLayoutGitignore(layoutDir);
+  }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const viewportId = input.result.viewport?.id || 'viewport_unknown';
   const runDir = path.join(

@@ -3,7 +3,7 @@ import path from 'path';
 import {LoadedQaFlow, QaFlowDefinition, QaFlowStep} from './types';
 
 export const DEFAULT_TEST_TIMEOUT_MS = 60 * 1000;
-export const SCREENSHOT_LIMIT_BYTES = 300 * 1024;
+export const SCREENSHOT_LIMIT_BYTES = 5 * 1024 * 1024;
 export const FLOW_MANIFEST_PATH = '.layout/qa.json';
 export const QA_DOCS_URL = 'https://github.com/Layout-App/layout-qa#readme';
 
