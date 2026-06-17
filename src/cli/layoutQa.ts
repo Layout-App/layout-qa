@@ -32,6 +32,7 @@ import {
 import {formatViewport, parseViewport} from '../viewports';
 
 const requireFromHere = createRequire(__filename);
+const REMOTE_TEST_DOCS_URL = 'https://trylayout.com/docs/qa#remote-ai-tests';
 
 type CliOptions = {
   command: string;
@@ -1215,22 +1216,32 @@ function apiEndpoint(baseUrl: string, pathName: string) {
   return `${baseUrl.replace(/\/+$/, '')}/${pathName.replace(/^\/+/, '')}`;
 }
 
+function remoteRunSetupError(missing: string[]) {
+  return [
+    `Layout remote test needs ${missing.join(', ')}.`,
+    `Docs: ${REMOTE_TEST_DOCS_URL}`,
+  ].join('\n');
+}
+
 async function remoteRunCommand(options: CliOptions) {
   const intent =
     options.command === 'test'
       ? options.intentText.trim()
       : options.intentText.trim() || options.intent.trim();
   if (options.command === 'test' && !intent) {
-    throw new Error('trylayout test requires an intent, e.g. trylayout test "test checkout recovery".');
+    throw new Error(
+      remoteRunSetupError([
+        'an intent, e.g. npx @trylayout/qa test "test this branch"',
+      ])
+    );
   }
-  if (!options.repo) {
-    throw new Error('--repo is required for remote runs.');
-  }
-  if (!options.branch) {
-    throw new Error('--ref or --branch is required for remote runs.');
-  }
-  if (!options.apiKey) {
-    throw new Error('--api-key is required for remote runs.');
+
+  const missing: string[] = [];
+  if (!options.repo) missing.push('--repo owner/repo');
+  if (!options.branch) missing.push('--ref branch');
+  if (!options.apiKey) missing.push('--api-key or LAYOUT_API_KEY');
+  if (missing.length > 0) {
+    throw new Error(remoteRunSetupError(missing));
   }
 
   const response = await postJson({
