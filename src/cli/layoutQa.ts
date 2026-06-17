@@ -4,6 +4,7 @@ import {spawn, type ChildProcess} from 'child_process';
 import fs from 'fs/promises';
 import net from 'net';
 import path from 'path';
+import {createRequire} from 'module';
 import {request as httpRequest} from 'http';
 import {request as httpsRequest} from 'https';
 import {URL} from 'url';
@@ -29,6 +30,8 @@ import {
   QaViewport,
 } from '../types';
 import {formatViewport, parseViewport} from '../viewports';
+
+const requireFromHere = createRequire(__filename);
 
 type CliOptions = {
   command: string;
@@ -71,6 +74,7 @@ Usage:
   trylayout init [options]
   trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
   trylayout check [flow_id ...] [options]
+  trylayout install-browsers
   trylayout mock-api [options]
   trylayout run --target-url <url> [options]
   trylayout remote run --repo <owner/repo> --ref <branch> [options]
@@ -80,6 +84,7 @@ Usage:
   layout-qa run --target-url <url> [options]
   npx @trylayout/qa test "intent" --repo <owner/repo> --ref <branch> [options]
   npx @trylayout/qa check [flow_id ...] [options]
+  npx @trylayout/qa install-browsers
   npx @trylayout/qa mock-api [options]
   npx @trylayout/qa run --target-url <url> [options]
   npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
@@ -89,6 +94,7 @@ Commands:
   init                  Write a starter .layout/qa.json.
   test                  Ask Layout to run AI browser QA remotely.
   check                 Run local/CI scripted manifest checks.
+  install-browsers      Install Chromium for local/CI browser checks.
   mock-api              Start a Layout mock API server from .layout/mocks.
   run                   Run browser QA and write a local HTML report.
   remote run            Ask Layout to run browser QA against a repo/ref.
@@ -411,6 +417,37 @@ function runShellCommand(input: {
   });
 }
 
+function runChildCommand(input: {
+  command: string;
+  args: string[];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  silent?: boolean;
+}) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(input.command, input.args, {
+      cwd: input.cwd,
+      env: input.env,
+      stdio: input.silent ? 'ignore' : 'inherit',
+    });
+    child.on('error', reject);
+    child.on('exit', code => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `Command failed (${code ?? 'signal'}): ${[
+            input.command,
+            ...input.args,
+          ].join(' ')}`
+        )
+      );
+    });
+  });
+}
+
 function requestOk(url: string) {
   return new Promise<boolean>(resolve => {
     const target = new URL(url);
@@ -624,6 +661,31 @@ async function initCommand(options: CliOptions) {
   process.stdout.write(`Created starter mock API scenarios in ${mockRoot}\n`);
 }
 
+async function installBrowsersCommand(options: CliOptions) {
+  const playwrightPackagePath = requireFromHere.resolve('playwright/package.json');
+  const playwrightCliPath = path.join(path.dirname(playwrightPackagePath), 'cli.js');
+
+  if (!options.json) {
+    process.stdout.write('Installing Chromium for Layout QA browser checks...\n');
+  }
+
+  await runChildCommand({
+    command: process.execPath,
+    args: [playwrightCliPath, 'install', 'chromium'],
+    cwd: process.cwd(),
+    env: process.env,
+    silent: options.json,
+  });
+
+  if (options.json) {
+    process.stdout.write(
+      `${JSON.stringify({status: 'installed', browser: 'chromium'}, null, 2)}\n`
+    );
+  } else {
+    process.stdout.write('Chromium is ready for Layout QA.\n');
+  }
+}
+
 async function mockApiCommand(options: CliOptions) {
   const manifestPath = options.flowsPath
     ? path.resolve(process.cwd(), options.flowsPath)
@@ -781,6 +843,25 @@ function printHumanSummary(input: {
 
   process.stdout.write(`\nArtifacts: ${input.artifacts.runDir}\n`);
   process.stdout.write(`Report: ${input.artifacts.reportPath}\n`);
+}
+
+function isMissingPlaywrightBrowserError(message: string) {
+  return (
+    /Executable doesn't exist/i.test(message) &&
+    /playwright install/i.test(message)
+  );
+}
+
+function layoutBrowserInstallMessage(originalMessage: string) {
+  if (!isMissingPlaywrightBrowserError(originalMessage)) return originalMessage;
+
+  return [
+    'Layout QA could not find the Playwright Chromium browser.',
+    'Run `npx @trylayout/qa install-browsers` once, then retry this check.',
+    'In GitHub Actions, add `npx @trylayout/qa install-browsers` before `npx @trylayout/qa check`.',
+    '',
+    `Original Playwright error: ${originalMessage}`,
+  ].join('\n');
 }
 
 function resultForConsole(result: QaTestRunResult) {
@@ -1032,7 +1113,9 @@ async function runBrowserChecks(input: {options: CliOptions; targetUrl: string})
         })
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = layoutBrowserInstallMessage(
+        error instanceof Error ? error.message : String(error)
+      );
       results.push(buildRunnerErrorResult(message, input.options.viewport));
     }
   }
@@ -1191,6 +1274,11 @@ async function main() {
 
   if (options.command === 'init') {
     await initCommand(options);
+    return;
+  }
+
+  if (options.command === 'install-browsers') {
+    await installBrowsersCommand(options);
     return;
   }
 

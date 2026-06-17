@@ -66,13 +66,15 @@ Or install it in a project:
 
 ```bash
 npm install --save-dev @trylayout/qa
+npx trylayout install-browsers
 npx trylayout check --target-url http://localhost:5173
 ```
 
-The package uses Playwright. If your environment does not already have Chromium installed for Playwright, run:
+The package uses Playwright underneath. If your environment does not already
+have Chromium installed for Playwright, run the Layout wrapper once:
 
 ```bash
-npx playwright install chromium
+npx @trylayout/qa install-browsers
 ```
 
 ## Quick Start
@@ -137,6 +139,7 @@ The process exits `0` on pass and `1` on failure, so the same command can run in
 trylayout init [options]
 trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
 trylayout check [flow_id ...] [options]
+trylayout install-browsers
 trylayout mock-api [options]
 trylayout run --target-url <url> [options]
 trylayout remote run --repo <owner/repo> --ref <branch> [options]
@@ -146,6 +149,7 @@ layout-qa mock-api [options]
 layout-qa run --target-url <url> [options]
 npx @trylayout/qa test "intent" --repo <owner/repo> --ref <branch> [options]
 npx @trylayout/qa check [flow_id ...] [options]
+npx @trylayout/qa install-browsers
 npx @trylayout/qa mock-api [options]
 npx @trylayout/qa run --target-url <url> [options]
 npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
@@ -532,7 +536,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npx playwright install chromium
+      - run: npx @trylayout/qa install-browsers
       - run: npx @trylayout/qa check --start-app --scenario happy_path --run-source github_actions --upload-url https://api.trylayout.com/v1/qa/uploads --api-key "$LAYOUT_API_KEY"
         env:
           LAYOUT_API_KEY: ${{ secrets.LAYOUT_API_KEY }}

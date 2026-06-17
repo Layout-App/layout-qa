@@ -5,6 +5,8 @@
 Both commands are equivalent:
 
 ```bash
+npx layout-qa install-browsers
+npx @trylayout/qa install-browsers
 npx layout-qa check --target-url http://localhost:5173 --scenario happy_path --open
 npx @trylayout/qa check --target-url http://localhost:5173 --scenario happy_path --open
 npx layout-qa mock-api --scenario happy_path
