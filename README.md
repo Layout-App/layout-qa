@@ -169,7 +169,7 @@ Options:
 --headed               Show the browser instead of running headless.
 --open                 Open the generated local HTML report after the run.
 --json                 Print machine-readable JSON.
---api-url <url>        Layout API base URL. Defaults to https://trylayout.com/api/v1/qa.
+--api-url <url>        Layout API base URL. Defaults to https://api.trylayout.com/v1/qa.
 --api-key <key>        Layout organization API key for uploads and remote runs.
 --upload-url <url>     Upload completed run JSON/screenshots to Layout.
 --repo <name>          Repository full name, e.g. owner/repo.
@@ -423,7 +423,7 @@ The CLI is local-first. If you have a Layout organization API key, the same run 
 ```bash
 npx @trylayout/qa check \
   --target-url http://localhost:5173 \
-  --upload-url https://trylayout.com/api/v1/qa/uploads \
+  --upload-url https://api.trylayout.com/v1/qa/uploads \
   --api-key "$LAYOUT_API_KEY" \
   --repo owner/repo \
   --branch "$BRANCH_NAME" \
@@ -533,7 +533,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install chromium
-      - run: npx @trylayout/qa check --start-app --scenario happy_path --run-source github_actions --upload-url https://trylayout.com/api/v1/qa/uploads --api-key "$LAYOUT_API_KEY"
+      - run: npx @trylayout/qa check --start-app --scenario happy_path --run-source github_actions --upload-url https://api.trylayout.com/v1/qa/uploads --api-key "$LAYOUT_API_KEY"
         env:
           LAYOUT_API_KEY: ${{ secrets.LAYOUT_API_KEY }}
       - uses: actions/upload-artifact@v4

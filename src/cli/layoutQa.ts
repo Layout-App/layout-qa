@@ -105,7 +105,7 @@ Options:
   --headed               Show the browser instead of running headless.
   --open                 Open the generated local HTML report after the run.
   --json                 Print machine-readable JSON.
-  --api-url <url>        Layout API base URL. Defaults to https://trylayout.com/api/v1/qa.
+  --api-url <url>        Layout API base URL. Defaults to https://api.trylayout.com/v1/qa.
   --api-key <key>        Layout organization API key for uploads and remote runs.
   --upload-url <url>     Upload completed run JSON/screenshots to Layout.
   --repo <name>          Repository full name, e.g. owner/repo.
@@ -236,7 +236,7 @@ function parseArgs(args: string[]): CliOptions {
     apiUrl:
       readFlag(args, '--api-url') ||
       envValue('LAYOUT_API_URL') ||
-      'https://trylayout.com/api/v1/qa',
+      'https://api.trylayout.com/v1/qa',
     apiKey:
       readFlag(args, '--api-key') ||
       envValue('LAYOUT_API_KEY'),
