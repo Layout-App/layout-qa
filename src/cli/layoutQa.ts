@@ -1002,6 +1002,10 @@ function readFileAsDataUrl(filePath: string) {
   });
 }
 
+type JsonResponseParseResult =
+  | {ok: true; body: Record<string, unknown>}
+  | {ok: false; error: string};
+
 function postJson(input: {
   url: string;
   token: string;
@@ -1033,20 +1037,28 @@ function postJson(input: {
           responseBody += chunk;
         });
         res.on('end', () => {
-          const parsed = responseBody
-            ? (JSON.parse(responseBody) as Record<string, unknown>)
-            : {};
-          if (!res.statusCode || res.statusCode >= 400) {
+          const parsed = parseJsonResponseBody(responseBody);
+          if (!parsed.ok) {
             reject(
               new Error(
                 `Request failed (${res.statusCode || 'unknown'}): ${
-                  parsed.message || parsed.error || responseBody
+                  parsed.error
                 }`
               )
             );
             return;
           }
-          resolve(parsed);
+          if (!res.statusCode || res.statusCode >= 400) {
+            reject(
+              new Error(
+                `Request failed (${res.statusCode || 'unknown'}): ${
+                  parsed.body.message || parsed.body.error || responseBody
+                }`
+              )
+            );
+            return;
+          }
+          resolve(parsed.body);
         });
       }
     );
@@ -1054,6 +1066,21 @@ function postJson(input: {
     req.write(body);
     req.end();
   });
+}
+
+function parseJsonResponseBody(responseBody: string): JsonResponseParseResult {
+  if (!responseBody) return {ok: true, body: {} as Record<string, unknown>};
+  try {
+    return {
+      ok: true,
+      body: JSON.parse(responseBody) as Record<string, unknown>,
+    };
+  } catch {
+    return {
+      ok: false,
+      error: responseBody.trim().slice(0, 500) || 'Non-JSON response',
+    };
+  }
 }
 
 function getJson(input: {url: string; token: string}) {
@@ -1080,20 +1107,28 @@ function getJson(input: {url: string; token: string}) {
           responseBody += chunk;
         });
         res.on('end', () => {
-          const parsed = responseBody
-            ? (JSON.parse(responseBody) as Record<string, unknown>)
-            : {};
-          if (!res.statusCode || res.statusCode >= 400) {
+          const parsed = parseJsonResponseBody(responseBody);
+          if (!parsed.ok) {
             reject(
               new Error(
                 `Request failed (${res.statusCode || 'unknown'}): ${
-                  parsed.message || parsed.error || responseBody
+                  parsed.error
                 }`
               )
             );
             return;
           }
-          resolve(parsed);
+          if (!res.statusCode || res.statusCode >= 400) {
+            reject(
+              new Error(
+                `Request failed (${res.statusCode || 'unknown'}): ${
+                  parsed.body.message || parsed.body.error || responseBody
+                }`
+              )
+            );
+            return;
+          }
+          resolve(parsed.body);
         });
       }
     );
@@ -1447,10 +1482,11 @@ async function main() {
 }
 
 main().catch(error => {
-  process.stderr.write(
-    `Layout QA failed to start: ${
-      error instanceof Error ? error.message : String(error)
-    }\n`
-  );
+  const message = error instanceof Error ? error.message : String(error);
+  if (process.argv.includes('--json')) {
+    process.stdout.write(`${JSON.stringify({error: message}, null, 2)}\n`);
+  } else {
+    process.stderr.write(`Layout QA failed: ${message}\n`);
+  }
   process.exitCode = 1;
 });
