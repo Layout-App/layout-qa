@@ -138,22 +138,28 @@ The process exits `0` on pass and `1` on failure, so the same command can run in
 ```text
 trylayout init [options]
 trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
+trylayout status <run_id> [options]
 trylayout check [flow_id ...] [options]
 trylayout install-browsers
 trylayout mock-api [options]
 trylayout run --target-url <url> [options]
 trylayout remote run --repo <owner/repo> --ref <branch> [options]
+trylayout remote status <run_id> [options]
 layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
+layout-qa status <run_id> [options]
 layout-qa check [flow_id ...] [options]
 layout-qa mock-api [options]
 layout-qa run --target-url <url> [options]
 npx @trylayout/qa test "intent" --repo <owner/repo> --ref <branch> [options]
+npx @trylayout/qa status <run_id> [options]
 npx @trylayout/qa check [flow_id ...] [options]
 npx @trylayout/qa install-browsers
 npx @trylayout/qa mock-api [options]
 npx @trylayout/qa run --target-url <url> [options]
 npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
+npx @trylayout/qa remote status <run_id> [options]
 npx layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
+npx layout-qa status <run_id> [options]
 npx layout-qa check [flow_id ...] [options]
 npx layout-qa mock-api [options]
 npx layout-qa run --target-url <url> [options]
@@ -470,6 +476,13 @@ npx @trylayout/qa test "test the checkout recovery flow" \
   --repo owner/repo \
   --ref feature-branch \
   --api-key "$LAYOUT_API_KEY"
+```
+
+Poll queued/running/completed remote tests with the same API key:
+
+```bash
+npx @trylayout/qa status <run_id> --api-key "$LAYOUT_API_KEY"
+npx @trylayout/qa status <run_id> --api-key "$LAYOUT_API_KEY" --json
 ```
 
 Remote AI tests require the repo to be connected through the Layout GitHub App

@@ -75,31 +75,38 @@ function printHelp() {
 Usage:
   trylayout init [options]
   trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
+  trylayout status <run_id> [options]
   trylayout check [flow_id ...] [options]
   trylayout install-browsers
   trylayout mock-api [options]
   trylayout run --target-url <url> [options]
   trylayout remote run --repo <owner/repo> --ref <branch> [options]
+  trylayout remote status <run_id> [options]
   layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
+  layout-qa status <run_id> [options]
   layout-qa check [flow_id ...] [options]
   layout-qa mock-api [options]
   layout-qa run --target-url <url> [options]
   npx @trylayout/qa test "intent" --repo <owner/repo> --ref <branch> [options]
+  npx @trylayout/qa status <run_id> [options]
   npx @trylayout/qa check [flow_id ...] [options]
   npx @trylayout/qa install-browsers
   npx @trylayout/qa mock-api [options]
   npx @trylayout/qa run --target-url <url> [options]
   npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
+  npx @trylayout/qa remote status <run_id> [options]
   npx layout-qa run --target-url <url> [options]
 
 Commands:
   init                  Write a starter .layout/qa.json.
   test                  Ask Layout to run AI browser QA remotely.
+  status                Check a queued/running/completed remote run.
   check                 Run local/CI scripted manifest checks.
   install-browsers      Install Chromium for local/CI browser checks.
   mock-api              Start a Layout mock API server from .layout/mocks.
   run                   Run browser QA and write a local HTML report.
   remote run            Ask Layout to run browser QA against a repo/ref.
+  remote status         Check a queued/running/completed remote run.
 
 Options:
   --target-url <url>     URL of the running frontend to test.
@@ -207,8 +214,15 @@ function inferBranch() {
 function parseArgs(args: string[]): CliOptions {
   const firstCommand = args[0] && !args[0].startsWith('--') ? args[0] : 'help';
   const command =
-    firstCommand === 'remote' && args[1] === 'run' ? 'remote-run' : firstCommand;
-  const positional = positionalArgs(args, command === 'remote-run' ? 2 : 1);
+    firstCommand === 'remote' && args[1] === 'run'
+      ? 'remote-run'
+      : firstCommand === 'remote' && args[1] === 'status'
+        ? 'remote-status'
+        : firstCommand;
+  const positional = positionalArgs(
+    args,
+    command === 'remote-run' || command === 'remote-status' ? 2 : 1
+  );
   const timeoutValue = readFlag(args, '--timeout');
   const parsedTimeoutMs = timeoutValue ? Number(timeoutValue) : undefined;
   const portValue = readFlag(args, '--port');
@@ -267,7 +281,12 @@ function parseArgs(args: string[]): CliOptions {
       readFlag(args, '--pr-number') ||
       envValue('LAYOUT_PR_NUMBER') ||
       inferGithubPrNumber(),
-    runId: readFlag(args, '--run-id') || envValue('LAYOUT_RUN_ID'),
+    runId:
+      readFlag(args, '--run-id') ||
+      (command === 'status' || command === 'remote-status'
+        ? positional[0]
+        : '') ||
+      envValue('LAYOUT_RUN_ID'),
     runSource: rawRunSource === 'github_actions' ? 'github_actions' : 'local',
     mode:
       command === 'test'
@@ -1037,6 +1056,52 @@ function postJson(input: {
   });
 }
 
+function getJson(input: {url: string; token: string}) {
+  const target = new URL(input.url);
+  const request = target.protocol === 'https:' ? httpsRequest : httpRequest;
+
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
+    const req = request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${input.token}`,
+          'User-Agent': '@trylayout/qa',
+        },
+      },
+      res => {
+        let responseBody = '';
+        res.setEncoding('utf8');
+        res.on('data', chunk => {
+          responseBody += chunk;
+        });
+        res.on('end', () => {
+          const parsed = responseBody
+            ? (JSON.parse(responseBody) as Record<string, unknown>)
+            : {};
+          if (!res.statusCode || res.statusCode >= 400) {
+            reject(
+              new Error(
+                `Request failed (${res.statusCode || 'unknown'}): ${
+                  parsed.message || parsed.error || responseBody
+                }`
+              )
+            );
+            return;
+          }
+          resolve(parsed);
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 async function uploadRun(input: {
   options: CliOptions;
   result: QaTestRunResult;
@@ -1268,6 +1333,74 @@ async function remoteRunCommand(options: CliOptions) {
   }
 }
 
+function remoteRunIssues(response: Record<string, unknown>) {
+  const run = response.run;
+  if (!run || typeof run !== 'object') return [];
+  const issues = (run as {issues?: unknown}).issues;
+  return Array.isArray(issues) ? issues : [];
+}
+
+async function remoteStatusCommand(options: CliOptions) {
+  const missing: string[] = [];
+  if (!options.runId) missing.push('run id');
+  if (!options.apiKey) missing.push('--api-key or LAYOUT_API_KEY');
+  if (missing.length > 0) {
+    throw new Error(remoteRunSetupError(missing));
+  }
+
+  const response = await getJson({
+    url: apiEndpoint(
+      options.apiUrl,
+      `/remote-runs/${encodeURIComponent(options.runId)}`
+    ),
+    token: options.apiKey,
+  });
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
+    return;
+  }
+
+  const status = String(response.status || 'unknown');
+  const phase = String(response.phase || 'unknown');
+  const phaseStatus = String(response.phaseStatus || '');
+  const phaseMessage = String(response.phaseMessage || '');
+  const screenCount = Number(response.screenCount || 0);
+  const issueCount = Number(response.issueCount || 0);
+  process.stdout.write(`Layout remote run ${status}\n`);
+  process.stdout.write(`Run: ${String(response.runId || options.runId)}\n`);
+  process.stdout.write(
+    `Phase: ${phase}${phaseStatus ? ` (${phaseStatus})` : ''}\n`
+  );
+  if (phaseMessage) {
+    process.stdout.write(`Message: ${phaseMessage}\n`);
+  }
+  process.stdout.write(`Screens: ${screenCount}\n`);
+  process.stdout.write(`Issues: ${issueCount}\n`);
+  if (response.runUrl || response.reportUrl) {
+    process.stdout.write(
+      `Report: ${String(response.runUrl || response.reportUrl)}\n`
+    );
+  }
+
+  const issues = remoteRunIssues(response).slice(0, 5);
+  if (issues.length) {
+    process.stdout.write('Top issues:\n');
+    for (const issue of issues) {
+      const item = issue as {
+        severity?: unknown;
+        type?: unknown;
+        message?: unknown;
+      };
+      process.stdout.write(
+        `- ${String(item.severity || 'issue')} ${String(
+          item.type || 'unknown'
+        )}: ${String(item.message || '')}\n`
+      );
+    }
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -1302,6 +1435,11 @@ async function main() {
 
   if (options.command === 'remote-run' || options.command === 'test') {
     await remoteRunCommand(options);
+    return;
+  }
+
+  if (options.command === 'remote-status' || options.command === 'status') {
+    await remoteStatusCommand(options);
     return;
   }
 
