@@ -516,6 +516,20 @@ async function caseSensitiveGoto(
   });
 }
 
+async function assertTextNotVisible(
+  page: Page,
+  text: string,
+  exact: boolean
+) {
+  const locator = page.getByText(text, {exact});
+  const count = await locator.count();
+  for (let index = 0; index < count; index += 1) {
+    if (await locator.nth(index).isVisible()) {
+      throw new Error(`Expected text not to be visible: ${text}`);
+    }
+  }
+}
+
 async function executeFlowStep(input: {
   page: Page;
   step: QaFlowStep;
@@ -537,10 +551,7 @@ async function executeFlowStep(input: {
     }
 
     for (const text of input.step.expectNoText || []) {
-      const count = await input.page.getByText(text, {exact}).count();
-      if (count > 0) {
-        throw new Error(`Expected text not to be visible: ${text}`);
-      }
+      await assertTextNotVisible(input.page, text, exact);
       expectationDetails.push(`Text not visible: ${text}`);
     }
 
