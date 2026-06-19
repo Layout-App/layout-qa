@@ -1,6 +1,6 @@
 {
   "name": "layout-qa",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Convenience alias for @trylayout/qa.",
   "license": "MIT",
   "author": "Layout",
@@ -36,6 +36,6 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@trylayout/qa": "^0.5.2"
+    "@trylayout/qa": "^0.6.0"
   }
 }

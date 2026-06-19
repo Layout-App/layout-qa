@@ -34,7 +34,7 @@ type MockRoute = {
 };
 
 type ManifestRecord = {
-  mockApi?: unknown;
+  services?: unknown;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -196,23 +196,23 @@ async function readScenario(input: {root: string; scenario: string}) {
   );
 }
 
-function resolveMockRoot(input: {manifestPath: string; root: string}) {
-  if (path.isAbsolute(input.root)) return input.root;
+function resolveManifestPath(input: {manifestPath: string; targetPath: string}) {
+  if (path.isAbsolute(input.targetPath)) return input.targetPath;
 
   const manifestDir = path.dirname(path.resolve(input.manifestPath));
   if (
-    input.root === '.layout' ||
-    input.root.startsWith(`.layout${path.sep}`) ||
-    input.root.startsWith('.layout/')
+    input.targetPath === '.layout' ||
+    input.targetPath.startsWith(`.layout${path.sep}`) ||
+    input.targetPath.startsWith('.layout/')
   ) {
     const repoRoot =
       path.basename(manifestDir) === '.layout'
         ? path.dirname(manifestDir)
         : manifestDir;
-    return path.resolve(repoRoot, input.root);
+    return path.resolve(repoRoot, input.targetPath);
   }
 
-  return path.resolve(manifestDir, input.root);
+  return path.resolve(manifestDir, input.targetPath);
 }
 
 export async function loadQaMockApiConfig(input: {
@@ -227,19 +227,21 @@ export async function loadQaMockApiConfig(input: {
   if (!content) return null;
 
   const manifest = JSON.parse(content) as ManifestRecord;
-  if (!isRecord(manifest.mockApi)) return null;
+  const services = isRecord(manifest.services) ? manifest.services : {};
+  const apiService = isRecord(services.api) ? services.api : null;
+  if (!apiService || apiService.type !== 'mock') return null;
 
   const root =
-    typeof manifest.mockApi.root === 'string'
-      ? manifest.mockApi.root
-      : '.layout/mocks';
+    typeof apiService.root === 'string' ? apiService.root : '.layout/api';
   const defaultScenario =
-    typeof manifest.mockApi.defaultScenario === 'string'
-      ? manifest.mockApi.defaultScenario
+    typeof apiService.scenario === 'string'
+      ? apiService.scenario
+      : typeof apiService.defaultScenario === 'string'
+      ? apiService.defaultScenario
       : 'happy_path';
 
   return {
-    root: resolveMockRoot({manifestPath, root}),
+    root: resolveManifestPath({manifestPath, targetPath: root}),
     defaultScenario: input.scenario || defaultScenario,
   } satisfies QaMockApiConfig;
 }

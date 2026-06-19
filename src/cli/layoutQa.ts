@@ -103,7 +103,7 @@ Commands:
   status                Check a queued/running/completed remote run.
   check                 Run local/CI scripted manifest checks.
   install-browsers      Install Chromium for local/CI browser checks.
-  mock-api              Start a Layout mock API server from .layout/mocks.
+  mock-api              Start a Layout mock service from manifest services.api.
   run                   Run browser QA and write a local HTML report.
   remote run            Ask Layout to run browser QA against a repo/ref.
   remote status         Check a queued/running/completed remote run.
@@ -112,8 +112,8 @@ Options:
   --target-url <url>     URL of the running frontend to test.
   --scenario <name>      Scenario to activate. Defaults to happy_path.
   --flows <path>         Flow manifest path. Defaults to .layout/qa.json.
-  --mock-root <path>     Mock API root. Defaults from .layout/qa.json mockApi.root.
-  --port <number>        Port for mock-api. Defaults to an available local port.
+  --mock-root <path>     Mock service root. Defaults from .layout/qa.json services.api.root.
+  --port <number>        Port for mock-api or a single service. Defaults to an available local port.
   --out <path>           Artifact directory. Defaults to .layout/runs.
   --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
   --timeout <ms>         Browser run timeout. Defaults to LAYOUT_QA_TEST_TIMEOUT_MS or 60000.
@@ -134,7 +134,7 @@ Options:
   --intent <text>        Natural-language intent for AI testing remote runs.
   --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
   --start-app            Start the app from .layout/qa.json before local checks.
-  --serve-mocks          Start mock API before local checks. Automatic with --start-app.
+  --serve-mocks          Start manifest services before local checks. Automatic with --start-app.
   --skip-install         With --start-app, skip app.install.
   --force                Overwrite an existing flow file during init.
   --help                 Show this help.
@@ -327,6 +327,24 @@ type AppConfig = {
   env: Record<string, string>;
 };
 
+type ServiceConfig = {
+  name: string;
+  type: 'mock' | 'command' | 'external';
+  root: string;
+  install?: string;
+  start?: string;
+  healthUrl?: string;
+  url?: string;
+  scenario?: string;
+  env: Record<string, string>;
+};
+
+type RunningService = {
+  name: string;
+  url: string;
+  close: () => Promise<void>;
+};
+
 type LocalCheckSession = {
   targetUrl: string;
   close: () => Promise<void>;
@@ -352,14 +370,17 @@ function repoRootFromManifest(manifestPath: string) {
     : manifestDir;
 }
 
-async function loadAppConfig(manifestPath: string) {
+async function readManifest(manifestPath: string) {
   const content = await fs.readFile(manifestPath, 'utf8').catch(error => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
     throw error;
   });
-  if (!content) return null;
+  return content ? (JSON.parse(content) as Record<string, unknown>) : null;
+}
 
-  const manifest = JSON.parse(content) as Record<string, unknown>;
+async function loadAppConfig(manifestPath: string) {
+  const manifest = await readManifest(manifestPath);
+  if (!manifest) return null;
   if (!isRecord(manifest.app)) return null;
 
   const app = manifest.app;
@@ -381,12 +402,50 @@ async function loadAppConfig(manifestPath: string) {
   } satisfies AppConfig;
 }
 
+async function loadServiceConfigs(manifestPath: string) {
+  const manifest = await readManifest(manifestPath);
+  if (!manifest || !isRecord(manifest.services)) return [];
+
+  return Object.entries(manifest.services)
+    .map(([name, raw]): ServiceConfig | null => {
+      if (!isRecord(raw)) return null;
+      const type = raw.type === 'command' || raw.type === 'external' ? raw.type : 'mock';
+      return {
+        name,
+        type,
+        root: typeof raw.root === 'string' && raw.root.trim() ? raw.root.trim() : '.',
+        install:
+          typeof raw.install === 'string' && raw.install.trim()
+            ? raw.install.trim()
+            : undefined,
+        start:
+          typeof raw.start === 'string' && raw.start.trim()
+            ? raw.start.trim()
+            : undefined,
+        healthUrl:
+          typeof raw.healthUrl === 'string' && raw.healthUrl.trim()
+            ? raw.healthUrl.trim()
+            : undefined,
+        url:
+          typeof raw.url === 'string' && raw.url.trim() ? raw.url.trim() : undefined,
+        scenario:
+          typeof raw.scenario === 'string' && raw.scenario.trim()
+            ? raw.scenario.trim()
+            : undefined,
+        env: stringRecord(raw.env),
+      };
+    })
+    .filter((service): service is ServiceConfig => Boolean(service));
+}
+
 function expandVariables(value: string, variables: Record<string, string>) {
-  return Object.entries(variables).reduce(
-    (expanded, [key, variableValue]) =>
-      expanded.split(`$${key}`).join(variableValue),
-    value
-  );
+  return Object.entries(variables).reduce((expanded, [key, variableValue]) => {
+    return expanded
+      .split(`$${key}`)
+      .join(variableValue)
+      .split(`\${${key}}`)
+      .join(variableValue);
+  }, value);
 }
 
 function expandEnv(
@@ -520,42 +579,176 @@ async function stopChild(child: ChildProcess | undefined) {
   });
 }
 
+function serviceVariables(services: RunningService[]) {
+  return services.reduce<Record<string, string>>((variables, service) => {
+    variables[`services.${service.name}.url`] = service.url;
+    variables[`${service.name}.url`] = service.url;
+    return variables;
+  }, {});
+}
+
+function serviceRoot(manifestPath: string, service: ServiceConfig) {
+  return path.resolve(repoRootFromManifest(manifestPath), service.root);
+}
+
+async function startCommandService(input: {
+  manifestPath: string;
+  service: ServiceConfig;
+  variables: Record<string, string>;
+  options: CliOptions;
+}) {
+  if (!input.service.start) {
+    throw new Error(`services.${input.service.name}.start is required for command services.`);
+  }
+
+  const port = await getAvailablePort();
+  const variables = {...input.variables, PORT: String(port)};
+  const root = serviceRoot(input.manifestPath, input.service);
+  const env = {
+    ...process.env,
+    ...expandEnv(input.service.env, variables),
+    PORT: String(port),
+  };
+
+  if (input.service.install && !input.options.skipInstall) {
+    await runShellCommand({
+      command: expandVariables(input.service.install, variables),
+      cwd: root,
+      env,
+      silent: input.options.json,
+    });
+  }
+
+  const startCommand = expandVariables(input.service.start, variables);
+  const child = spawn(startCommand, {
+    cwd: root,
+    env,
+    shell: true,
+    stdio: input.options.json ? 'ignore' : 'inherit',
+  });
+  child.on('error', error => {
+    process.stderr.write(
+      `Layout service "${input.service.name}" start failed: ${error.message}\n`
+    );
+  });
+
+  const healthUrl = expandVariables(
+    input.service.healthUrl || `http://127.0.0.1:${port}/`,
+    variables
+  );
+  await waitForUrl(healthUrl, input.options.timeoutMs || getTestTimeoutMs());
+
+  return {
+    name: input.service.name,
+    url: new URL(healthUrl).origin,
+    close: () => stopChild(child),
+  } satisfies RunningService;
+}
+
+async function startMockService(input: {
+  manifestPath: string;
+  service: ServiceConfig;
+  options: CliOptions;
+}) {
+  const root = path.resolve(repoRootFromManifest(input.manifestPath), input.service.root);
+  const server = await startQaMockApiServer({
+    root,
+    scenario: input.options.scenario || input.service.scenario || 'happy_path',
+    port: input.options.port,
+  });
+  if (!input.options.json) {
+    process.stdout.write(
+      `Layout mock service "${input.service.name}" listening at ${server.url}\n`
+    );
+  }
+  return {
+    name: input.service.name,
+    url: server.url,
+    close: () => server.close(),
+  } satisfies RunningService;
+}
+
+async function startServices(input: {
+  manifestPath: string;
+  options: CliOptions;
+}) {
+  const configs = await loadServiceConfigs(input.manifestPath);
+  const running: RunningService[] = [];
+
+  try {
+    for (const service of configs) {
+      const variables = serviceVariables(running);
+      if (service.type === 'external') {
+        if (!service.url) {
+          throw new Error(`services.${service.name}.url is required for external services.`);
+        }
+        const url = expandVariables(service.url, variables);
+        if (service.healthUrl) {
+          await waitForUrl(
+            expandVariables(service.healthUrl, {
+              ...variables,
+              [`services.${service.name}.url`]: url,
+              [`${service.name}.url`]: url,
+            }),
+            input.options.timeoutMs || getTestTimeoutMs()
+          );
+        }
+        running.push({
+          name: service.name,
+          url,
+          close: async () => undefined,
+        });
+      } else if (service.type === 'command') {
+        running.push(
+          await startCommandService({
+            manifestPath: input.manifestPath,
+            service,
+            variables,
+            options: input.options,
+          })
+        );
+      } else {
+        running.push(
+          await startMockService({
+            manifestPath: input.manifestPath,
+            service,
+            options: input.options,
+          })
+        );
+      }
+    }
+  } catch (error) {
+    for (const service of running.slice().reverse()) {
+      await service.close().catch(() => undefined);
+    }
+    throw error;
+  }
+
+  return running;
+}
+
 async function startLocalCheckSession(input: {
   options: CliOptions;
   manifestPath: string;
 }) {
-  let mockServer:
-    | Awaited<ReturnType<typeof startQaMockApiServer>>
-    | undefined;
+  const services: RunningService[] = [];
   let appProcess: ChildProcess | undefined;
 
   const close = async () => {
     await stopChild(appProcess);
-    await mockServer?.close().catch(() => {
-      // Best-effort shutdown.
-    });
+    for (const service of services.slice().reverse()) {
+      await service.close().catch(() => {
+        // Best-effort shutdown.
+      });
+    }
   };
 
-  const shouldStartMocks = input.options.serveMocks || input.options.startApp;
-  const mockConfig = shouldStartMocks
-    ? await loadQaMockApiConfig({
+  if (input.options.startApp || input.options.serveMocks) {
+    services.push(
+      ...(await startServices({
         manifestPath: input.manifestPath,
-        scenario: input.options.scenario,
-      })
-    : null;
-
-  if (mockConfig) {
-    mockServer = await startQaMockApiServer({
-      root: mockConfig.root,
-      scenario: input.options.scenario || mockConfig.defaultScenario,
-      port: input.options.port,
-    });
-    if (!input.options.json) {
-      process.stdout.write(`Layout mock API listening at ${mockServer.url}\n`);
-    }
-  } else if (input.options.serveMocks) {
-    throw new Error(
-      'No mock API root found. Add mockApi.root to .layout/qa.json or omit --serve-mocks.'
+        options: input.options,
+      }))
     );
   }
 
@@ -580,32 +773,21 @@ async function startLocalCheckSession(input: {
 
   const port = await getAvailablePort();
   const variables = {
+    ...serviceVariables(services),
     PORT: String(port),
-    LAYOUT_MOCK_API_URL:
-      mockServer?.url || process.env.LAYOUT_MOCK_API_URL || '',
   };
   const appEnv = expandEnv(app.env, variables);
-  const missingMockUrl = Object.values(app.env).some(value =>
-    value.includes('$LAYOUT_MOCK_API_URL')
-  );
-  if (missingMockUrl && !variables.LAYOUT_MOCK_API_URL) {
-    await close();
-    throw new Error(
-      'app.env references $LAYOUT_MOCK_API_URL, but no mock API server is configured.'
-    );
-  }
 
   const appRoot = path.resolve(repoRootFromManifest(input.manifestPath), app.root);
   const env = {
     ...process.env,
     ...appEnv,
     PORT: String(port),
-    LAYOUT_MOCK_API_URL: variables.LAYOUT_MOCK_API_URL,
   };
 
   if (app.install && !input.options.skipInstall) {
     await runShellCommand({
-      command: app.install,
+      command: expandVariables(app.install, variables),
       cwd: appRoot,
       env,
       silent: input.options.json,
@@ -656,7 +838,7 @@ async function initCommand(options: CliOptions) {
   const mockRoot = path.resolve(
     path.dirname(path.dirname(manifestPath)),
     '.layout',
-    'mocks',
+    'api',
     'scenarios'
   );
   await fs.mkdir(mockRoot, {recursive: true});
@@ -667,7 +849,7 @@ async function initCommand(options: CliOptions) {
     await fs.writeFile(scenarioPath, `${JSON.stringify(routes, null, 2)}\n`);
   }
   process.stdout.write(`Created ${manifestPath}\n`);
-  process.stdout.write(`Created starter mock API scenarios in ${mockRoot}\n`);
+  process.stdout.write(`Created starter mock service scenarios in ${mockRoot}\n`);
   process.stdout.write(
     `Updated ${layoutGitignorePath} to ignore generated Layout artifacts\n`
   );
@@ -712,7 +894,7 @@ async function mockApiCommand(options: CliOptions) {
 
   if (!root) {
     throw new Error(
-      'No mock API root found. Add mockApi.root to .layout/qa.json or pass --mock-root.'
+      'No mock service root found. Add services.api with type "mock" to .layout/qa.json or pass --mock-root.'
     );
   }
 
@@ -736,8 +918,8 @@ async function mockApiCommand(options: CliOptions) {
       )}\n`
     );
   } else {
-    process.stdout.write(`Layout mock API listening at ${server.url}\n`);
-    process.stdout.write(`LAYOUT_MOCK_API_URL=${server.url}\n`);
+    process.stdout.write(`Layout mock service listening at ${server.url}\n`);
+    process.stdout.write(`Service URL: ${server.url}\n`);
     process.stdout.write(`Scenario: ${server.scenario}\n`);
     process.stdout.write(`Root: ${server.root}\n`);
   }
@@ -759,7 +941,7 @@ async function mockApiCommand(options: CliOptions) {
   });
 
   await new Promise(() => {
-    // Keep the mock API process alive until it receives a termination signal.
+    // Keep the mock service process alive until it receives a termination signal.
   });
 }
 

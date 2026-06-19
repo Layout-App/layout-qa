@@ -4,7 +4,7 @@
 [![CI](https://github.com/Layout-App/layout-qa/actions/workflows/ci.yml/badge.svg)](https://github.com/Layout-App/layout-qa/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-black.svg)](LICENSE)
 
-Layout QA is a browser QA protocol and runner for frontend changes. It runs deterministic flows against a local or CI-served URL, can serve centralized mock API scenarios, captures screenshots at meaningful checkpoints, checks browser health, and writes a static HTML report.
+Layout QA is a browser QA protocol and runner for frontend changes. It runs deterministic flows against a local or CI-served URL, can start manifest-declared QA services, captures screenshots at meaningful checkpoints, checks browser health, and writes a static HTML report.
 
 The core loop is intentionally local:
 
@@ -39,9 +39,9 @@ npx layout-qa check --target-url http://localhost:5173 --scenario happy_path --o
 
 Frontend agents and developers can move faster when they have a visual feedback loop they can run themselves. Layout gives the repo a small protocol:
 
-- Point the frontend API base URL at Layout's mock API server when QA mode is enabled.
-- Keep deterministic mock API responses centralized in `.layout/mocks/scenarios`.
-- Wire auth and unavoidable SDK behavior behind a QA env flag such as `LAYOUT_QA=1` or `VITE_LAYOUT_QA=1`.
+- Declare any QA data/API service the app needs in `.layout/qa.json`.
+- Point the frontend API base URL at `$services.api.url` or any other named service URL.
+- Wire auth and unavoidable SDK behavior behind whatever QA env flag your app already understands.
 - Switch response states with `localStorage["layout.qa.scenario"]`.
 - Declare high-value browser flows in `.layout/qa.json`.
 - Run the CLI locally or in GitHub Actions and inspect the generated screenshots/report.
@@ -85,17 +85,15 @@ Create a starter flow manifest:
 npx @trylayout/qa init
 ```
 
-Start the mock API server in one terminal:
+Start the built-in mock service in one terminal:
 
 ```bash
 npx @trylayout/qa mock-api --scenario happy_path
 ```
 
-Start your app with whatever QA flag your project uses and point its API base URL at the printed `LAYOUT_MOCK_API_URL`:
+Start your app with whatever QA flags your project uses and point its API base URL at the printed service URL:
 
 ```bash
-LAYOUT_QA=1 \
-VITE_LAYOUT_QA=1 \
 VITE_API_BASE_URL=http://127.0.0.1:4311 \
 npm run dev
 ```
@@ -116,7 +114,7 @@ session from one command:
 npx @trylayout/qa check --start-app --skip-install --open
 ```
 
-That starts the mock API when `mockApi` is configured, starts the app with the
+That starts every declared `services` entry, starts the app with the
 manifest `app.start` command, runs manifest flows, writes the report, and shuts
 the child processes down when finished or interrupted.
 
@@ -171,8 +169,8 @@ Options:
 --target-url <url>     URL of the running frontend to test.
 --scenario <name>      Scenario to activate. Defaults to happy_path.
 --flows <path>         Flow manifest path. Defaults to .layout/qa.json.
---mock-root <path>     Mock API root. Defaults from .layout/qa.json mockApi.root.
---port <number>        Port for mock-api. Defaults to an available local port.
+--mock-root <path>     Mock service root. Defaults from .layout/qa.json services.api.root.
+--port <number>        Port for mock-api or a single service. Defaults to an available local port.
 --out <path>           Artifact directory. Defaults to .layout/runs.
 --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
 --timeout <ms>         Browser run timeout. Defaults to LAYOUT_QA_TEST_TIMEOUT_MS or 60000.
@@ -192,7 +190,7 @@ Options:
 --mode <value>         scripted or ai. Defaults to ai for remote run.
 --intent <text>        Natural-language intent for AI testing remote runs.
 --start-app            Start the app from .layout/qa.json before local checks.
---serve-mocks          Start mock API before local checks. Automatic with --start-app.
+--serve-mocks          Start manifest services before local checks. Automatic with --start-app.
 --skip-install         With --start-app, skip app.install.
 --force                Overwrite an existing flow file during init.
 ```
@@ -206,19 +204,21 @@ run Layout QA from the package/app directory you want to test, or pass
 ```json
 {
   "version": 1,
+  "services": {
+    "api": {
+      "type": "mock",
+      "root": ".layout/api",
+      "scenario": "happy_path"
+    }
+  },
   "app": {
     "root": ".",
     "install": "npm ci",
     "start": "npm run dev -- --host 127.0.0.1 --port $PORT",
+    "healthUrl": "http://127.0.0.1:$PORT/",
     "env": {
-      "LAYOUT_QA": "1",
-      "VITE_LAYOUT_QA": "1",
-      "VITE_API_BASE_URL": "$LAYOUT_MOCK_API_URL"
+      "VITE_API_BASE_URL": "$services.api.url"
     }
-  },
-  "mockApi": {
-    "root": ".layout/mocks",
-    "defaultScenario": "happy_path"
   },
   "viewports": ["desktop"],
   "flows": [
@@ -240,17 +240,50 @@ run Layout QA from the package/app directory you want to test, or pass
 Top-level fields:
 
 - `version`: currently `1`.
+- `services`: optional named QA services. Layout starts these before the app and exposes each URL as `$services.<name>.url`.
 - `app`: optional for local CLI-only runs, required for Layout-managed branch runs. Defines how to install and start the frontend.
-- `mockApi`: optional centralized mock API configuration. When present, Layout can start a local mock API server and expose it as `$LAYOUT_MOCK_API_URL`.
 - `viewports`: optional default viewport labels for hosted/CI integrations.
 - `flows`: array of flow definitions.
+
+Service types:
+
+- `mock`: Layout's built-in JSON scenario server.
+- `command`: a user-provided server command such as MSW, a fake API, or a local backend in QA mode.
+- `external`: an already-running URL.
+
+Command services use the same lifecycle as the app:
+
+```json
+{
+  "services": {
+    "api": {
+      "type": "command",
+      "root": "api",
+      "install": "npm ci",
+      "start": "npm run qa -- --host 127.0.0.1 --port $PORT",
+      "healthUrl": "http://127.0.0.1:$PORT/health",
+      "env": {
+        "QA_MODE": "true"
+      }
+    }
+  },
+  "app": {
+    "env": {
+      "VITE_API_BASE_URL": "$services.api.url"
+    }
+  }
+}
+```
+
+Layout does not require a specific QA flag name. `app.env` and service `env`
+are whatever the app/server understands.
 
 ## Mock API Scenarios
 
 `layout-qa init` creates starter scenarios in:
 
 ```text
-.layout/mocks/scenarios/
+.layout/api/scenarios/
   happy_path.json
   empty.json
   error.json
@@ -301,7 +334,7 @@ Commit the durable QA contract:
 
 ```text
 .layout/qa.json
-.layout/mocks/scenarios/*.json
+.layout/api/scenarios/*.json
 .layout/.gitignore
 ```
 
@@ -317,7 +350,7 @@ Do not commit generated run artifacts:
 
 The mock scenario files should contain fake deterministic data only. Do not put
 secrets, production tokens, real customer data, or one-off local machine paths in
-`.layout/mocks`.
+`.layout/api`.
 
 `layout-qa init` writes `.layout/.gitignore` with generated report directories
 ignored so reports stay local while the manifest and mock scenarios remain
@@ -516,21 +549,21 @@ Goal:
 Create a browser QA loop that works locally and can also be used by Layout remote branch runs.
 
 Rules:
-- Use the Layout mock API server from @trylayout/qa for backend responses.
+- Use manifest `services` to declare how QA API/data responses are served.
 - Do not require a hosted Layout service for local scripted checks.
-- Keep all deterministic response fixtures in .layout/mocks/scenarios.
-- Gate auth, SDKs, and unsafe writes behind a QA env flag such as LAYOUT_QA=1, VITE_LAYOUT_QA=1, NEXT_PUBLIC_LAYOUT_QA=1, or the framework-appropriate equivalent.
-- Point the frontend API base URL at $LAYOUT_MOCK_API_URL in QA mode.
+- Keep built-in mock response fixtures in .layout/api/scenarios.
+- Gate auth, SDKs, and unsafe writes behind whatever QA env flag this app already understands.
+- Point the frontend API base URL at $services.api.url in .layout/qa.json app.env.
 - Hide any local QA switcher or debug controls when sessionStorage["layout.qa.runner"] === "1".
 
 Implementation:
-- Add .layout/mocks/scenarios/happy_path.json, empty.json, and error.json with fake deterministic API responses.
+- Add .layout/api/scenarios/happy_path.json, empty.json, and error.json with fake deterministic API responses, or add a services.api command that starts this repo's own QA backend.
 - If the app has a central auth/session abstraction, add a deterministic QA user only when the Layout QA env flag is enabled.
 - If auth is scattered or provider-SDK-only, leave a clear note in the PR/code comments and start with public or logged-out flows.
 - Add .layout/qa.json with one smoke flow for the most important page.
 - Prefer visible text and stable selectors.
 - Add screenshot checkpoints after meaningful user-visible states.
-- Commit .layout/qa.json, .layout/mocks/scenarios/*.json, and .layout/.gitignore.
+- Commit .layout/qa.json, .layout/api/scenarios/*.json, and .layout/.gitignore.
 - Do not commit .layout/runs, secrets, production tokens, or real customer data.
 
 Run:

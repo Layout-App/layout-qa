@@ -173,9 +173,9 @@ function buildNextAction(input: {
         'The page loaded, but Layout could not confirm that the requested scenario was available.',
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
-        'Confirm the target is running with the Layout QA env flag set to 1.',
-        'Check that the app receives the active scenario and points API calls at the Layout mock API server when configured.',
-        `Review ${FLOW_MANIFEST_PATH}, .layout/mocks scenarios, the Layout QA docs, and auth fixtures for missing handlers.`,
+        'Confirm the target is running with the QA env flags declared in the manifest.',
+        'Check that the app receives the active scenario and points API calls at the configured manifest service URL.',
+        `Review ${FLOW_MANIFEST_PATH}, service scenarios, the Layout QA docs, and auth fixtures for missing handlers.`,
       ],
     };
   }
@@ -210,7 +210,7 @@ function buildNextAction(input: {
       docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
         'Inspect the issues captured on this QA run.',
-        'Add or correct .layout/mocks scenario responses for unhandled frontend API requests.',
+        'Add or correct manifest service responses for unhandled frontend API requests.',
         'Check auth, SDKs, and safe-write guards that still require app-side QA flags.',
         'Fix app code that throws under the selected scenario, then rerun.',
       ],
@@ -240,7 +240,7 @@ function buildNextAction(input: {
     docsPath: FLOW_MANIFEST_PATH,
       nextSteps: [
         `Add route-specific Playwright-style flow steps to ${FLOW_MANIFEST_PATH} for the highest-value user path.`,
-        'Expand .layout/mocks scenario responses for any API requests encountered by that flow.',
+        'Expand manifest service responses for any API requests encountered by that flow.',
         'Keep auth and unsafe writes behind the narrowest possible QA-mode boundary.',
         'Run the same flow across happy_path, empty, and error scenarios.',
       ],
