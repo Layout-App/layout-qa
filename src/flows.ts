@@ -43,6 +43,18 @@ function expectTextArray(value: unknown) {
   return stringArray(text);
 }
 
+function expectNoTextArray(value: unknown) {
+  if (!isRecord(value)) return [];
+  const noText = value.noText;
+  if (typeof noText === 'string') return [noText];
+  if (Array.isArray(noText)) {
+    return noText.filter(item => typeof item === 'string');
+  }
+  const notText = value.notText;
+  if (typeof notText === 'string') return [notText];
+  return stringArray(notText);
+}
+
 function isLikelySelector(value: string) {
   return /^(#|\.|\[)/.test(value) || /[#.[\]:>~+]/.test(value);
 }
@@ -96,6 +108,7 @@ function normalizeFlowStep(value: unknown, index: number): QaFlowStep | null {
     label: stringValue(value.label || value.name || shortcut?.label).trim(),
     text: stringValue(value.text || shortcut?.text).trim(),
     expectText: expectTextArray(value.expect),
+    expectNoText: expectNoTextArray(value.expect),
     expectNoConsoleErrors:
       isRecord(expect) && expect.noConsoleErrors === true ? true : undefined,
     selector:

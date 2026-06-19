@@ -536,6 +536,14 @@ async function executeFlowStep(input: {
       expectationDetails.push(`Visible text found: ${text}`);
     }
 
+    for (const text of input.step.expectNoText || []) {
+      const count = await input.page.getByText(text, {exact}).count();
+      if (count > 0) {
+        throw new Error(`Expected text not to be visible: ${text}`);
+      }
+      expectationDetails.push(`Text not visible: ${text}`);
+    }
+
     if (input.step.expectNoConsoleErrors) {
       const browserErrors = input.issues.filter(entry =>
         ['console_error', 'page_error'].includes(entry.type)
@@ -575,6 +583,48 @@ async function executeFlowStep(input: {
       .first()
       .waitFor({state: 'visible', timeout: stepTimeout});
     return withExpectations(`Visible text found: ${text}`);
+  }
+
+  if (
+    input.step.type === 'assert_not_visible_text' ||
+    input.step.type === 'assert_absent_text'
+  ) {
+    const text = requireStepValue(input.step.text, 'text');
+    await input.page
+      .getByText(text, {exact})
+      .first()
+      .waitFor({state: 'hidden', timeout: stepTimeout});
+    return withExpectations(`Text not visible: ${text}`);
+  }
+
+  if (input.step.type === 'wait') {
+    await input.page.waitForTimeout(stepTimeout);
+    return withExpectations(`Waited ${stepTimeout}ms.`);
+  }
+
+  if (input.step.type === 'reload') {
+    await input.page.reload({waitUntil: 'domcontentloaded', timeout: stepTimeout});
+    await input.page
+      .waitForLoadState('networkidle', {timeout: Math.min(stepTimeout, 5000)})
+      .catch(() => {
+        // DOM assertions after the step are the source of truth.
+      });
+    return withExpectations('Reloaded current page.');
+  }
+
+  if (input.step.type === 'assert_stable_for') {
+    const durationMs = stepTimeout;
+    const intervalMs = Math.min(500, Math.max(100, Math.floor(durationMs / 5)));
+    const startedAt = Date.now();
+    let checks = 0;
+    while (Date.now() - startedAt < durationMs) {
+      await withExpectations('');
+      checks += 1;
+      await input.page.waitForTimeout(intervalMs);
+    }
+    await withExpectations('');
+    checks += 1;
+    return `State remained stable for ${durationMs}ms across ${checks} checks.`;
   }
 
   if (input.step.type === 'click') {

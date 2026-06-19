@@ -75,6 +75,7 @@ export type QaFlowStep = {
   label?: string;
   text?: string;
   expectText?: string[];
+  expectNoText?: string[];
   expectNoConsoleErrors?: boolean;
   selector?: string;
   value?: string;

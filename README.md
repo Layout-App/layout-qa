@@ -392,8 +392,13 @@ Supported explicit step types:
 - `goto`: navigate to `url`.
 - `click`: click by `selector` or visible `text`.
 - `fill`: fill a `selector` with `value`.
+- `reload`: reload the current page and wait for the DOM to be ready.
+- `wait`: wait for `timeoutMs`; attached expectations are checked after the wait.
 - `assert_visible_text`: require visible `text`.
 - `wait_for_text`: alias for a visible text wait.
+- `assert_not_visible_text`: require `text` not to be visible.
+- `assert_absent_text`: alias for `assert_not_visible_text`.
+- `assert_stable_for`: repeatedly apply attached expectations for `timeoutMs`.
 - `assert_url`: require current URL to equal `url` or contain `contains`.
 - `assert_no_horizontal_overflow`: require the page not to overflow the viewport horizontally.
 - `assert_in_viewport`: require a `selector` or visible `text` to have a nonzero box intersecting the viewport.
@@ -403,6 +408,8 @@ Supported explicit step types:
 Supported expectations:
 
 - `{"expect": {"text": ["Visible copy"]}}`: require visible text after the step.
+- `{"expect": {"noText": ["Loading..."]}}`: require text not to be visible after the step.
+- `{"expect": {"notText": ["Loading..."]}}`: alias for `noText`.
 - `{"expect": {"noConsoleErrors": true}}`: require no console/page errors observed so far.
 
 Examples:
@@ -429,6 +436,22 @@ Examples:
 
 ```json
 { "id": "settings_url", "type": "assert_url", "contains": "/settings" }
+```
+
+```json
+{ "id": "reload_detail", "type": "reload", "timeoutMs": 10000 }
+```
+
+```json
+{
+  "id": "detail_stays_loaded",
+  "type": "assert_stable_for",
+  "timeoutMs": 3000,
+  "expect": {
+    "text": ["Order details"],
+    "noText": ["Loading order", "Order unavailable"]
+  }
+}
 ```
 
 ```json

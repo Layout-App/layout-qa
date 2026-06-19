@@ -81,6 +81,45 @@ async function main() {
       assert.equal(childLoaded.manifestFound, true);
       assert.equal(childLoaded.flows[0].id, 'landing_page_smoke');
 
+      await fs.writeFile(
+        path.join(childCwd, FLOW_MANIFEST_PATH),
+        JSON.stringify(
+          {
+            version: 1,
+            flows: [
+              {
+                id: 'entry_path_stability',
+                steps: [
+                  {visit: '/items/123'},
+                  {type: 'reload', timeoutMs: 5000},
+                  {
+                    type: 'assert_stable_for',
+                    timeoutMs: 1200,
+                    expect: {
+                      text: ['Item details'],
+                      noText: ['Loading item'],
+                    },
+                  },
+                  {type: 'assert_not_visible_text', text: 'Item unavailable'},
+                ],
+              },
+            ],
+          },
+          null,
+          2
+        )
+      );
+      const stabilityLoaded = await loadFlows({
+        flowsPath: '',
+        scenario: 'happy_path',
+      });
+      const stabilitySteps = stabilityLoaded.flows[0].steps;
+      assert.equal(stabilitySteps[1].type, 'reload');
+      assert.equal(stabilitySteps[2].type, 'assert_stable_for');
+      assert.deepEqual(stabilitySteps[2].expectText, ['Item details']);
+      assert.deepEqual(stabilitySteps[2].expectNoText, ['Loading item']);
+      assert.equal(stabilitySteps[3].type, 'assert_not_visible_text');
+
       const artifacts = await writeArtifacts({
         outDir: '',
         scenario: 'happy_path',
