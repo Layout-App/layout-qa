@@ -29,15 +29,21 @@ async function main() {
     await fs.writeFile(
       path.join(root, FLOW_MANIFEST_PATH),
       JSON.stringify(
-        {
-          version: 1,
-          flows: [
-            {
-              id: 'main_app_dashboard',
-              steps: [{screenshot: 'Dashboard'}],
+          {
+            version: 1,
+            apps: {
+              app: {
+                root: '.',
+                start: 'npm run dev -- --port $PORT',
+                flows: [
+                  {
+                    id: 'main_app_dashboard',
+                    steps: [{screenshot: 'Dashboard'}],
+                  },
+                ],
+              },
             },
-          ],
-        },
+          },
         null,
         2
       )
@@ -59,12 +65,18 @@ async function main() {
         JSON.stringify(
           {
             version: 1,
-            flows: [
-              {
-                id: 'landing_page_smoke',
-                steps: [{screenshot: 'Landing'}],
+            apps: {
+              landing: {
+                root: '.',
+                start: 'npm run dev -- --port $PORT',
+                flows: [
+                  {
+                    id: 'landing_page_smoke',
+                    steps: [{screenshot: 'Landing'}],
+                  },
+                ],
               },
-            ],
+            },
           },
           null,
           2
@@ -86,24 +98,30 @@ async function main() {
         JSON.stringify(
           {
             version: 1,
-            flows: [
-              {
-                id: 'entry_path_stability',
-                steps: [
-                  {visit: '/items/123'},
-                  {type: 'reload', timeoutMs: 5000},
+            apps: {
+              landing: {
+                root: '.',
+                start: 'npm run dev -- --port $PORT',
+                flows: [
                   {
-                    type: 'assert_stable_for',
-                    timeoutMs: 1200,
-                    expect: {
-                      text: ['Item details'],
-                      noText: ['Loading item'],
-                    },
+                    id: 'entry_path_stability',
+                    steps: [
+                      {visit: '/items/123'},
+                      {type: 'reload', timeoutMs: 5000},
+                      {
+                        type: 'assert_stable_for',
+                        timeoutMs: 1200,
+                        expect: {
+                          text: ['Item details'],
+                          noText: ['Loading item'],
+                        },
+                      },
+                      {type: 'assert_not_visible_text', text: 'Item unavailable'},
+                    ],
                   },
-                  {type: 'assert_not_visible_text', text: 'Item unavailable'},
                 ],
               },
-            ],
+            },
           },
           null,
           2

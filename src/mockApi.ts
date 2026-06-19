@@ -34,7 +34,7 @@ type MockRoute = {
 };
 
 type ManifestRecord = {
-  services?: unknown;
+  apps?: unknown;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -218,6 +218,7 @@ function resolveManifestPath(input: {manifestPath: string; targetPath: string}) 
 export async function loadQaMockApiConfig(input: {
   manifestPath?: string;
   scenario?: string;
+  app?: string;
 }) {
   const manifestPath = path.resolve(input.manifestPath || FLOW_MANIFEST_PATH);
   const content = await fs.readFile(manifestPath, 'utf8').catch(error => {
@@ -227,7 +228,18 @@ export async function loadQaMockApiConfig(input: {
   if (!content) return null;
 
   const manifest = JSON.parse(content) as ManifestRecord;
-  const services = isRecord(manifest.services) ? manifest.services : {};
+  const entries = isRecord(manifest.apps)
+    ? Object.entries(manifest.apps).filter((entry): entry is [string, Record<string, unknown>] =>
+        isRecord(entry[1])
+      )
+    : [];
+  const selectedApp = input.app
+    ? entries.find(([name]) => name === input.app)?.[1]
+    : entries.length === 1
+      ? entries[0][1]
+      : entries.find(([, app]) => app.default === true)?.[1] ||
+        entries.find(([name]) => name === 'app')?.[1];
+  const services = isRecord(selectedApp?.services) ? selectedApp.services : {};
   const apiService = isRecord(services.api) ? services.api : null;
   if (!apiService || apiService.type !== 'mock') return null;
 

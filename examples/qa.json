@@ -1,45 +1,47 @@
 {
   "version": 1,
-  "services": {
-    "api": {
-      "type": "mock",
-      "root": ".layout/api",
-      "scenario": "happy_path"
-    }
-  },
-  "app": {
-    "root": ".",
-    "install": "npm ci",
-    "start": "npm run dev -- --host 127.0.0.1 --port $PORT",
-    "healthUrl": "http://127.0.0.1:$PORT/",
-    "env": {
-      "VITE_API_BASE_URL": "$services.api.url"
-    }
-  },
-  "viewports": ["desktop"],
-  "flows": [
-    {
-      "id": "smoke",
-      "label": "Smoke",
-      "scenarios": ["happy_path"],
-      "steps": [
-        {"visit": "/"},
+  "apps": {
+    "app": {
+      "root": ".",
+      "install": "npm ci",
+      "start": "npm run dev -- --host 127.0.0.1 --port $PORT",
+      "healthUrl": "http://127.0.0.1:$PORT/",
+      "services": {
+        "api": {
+          "type": "mock",
+          "root": ".layout/api",
+          "scenario": "happy_path"
+        }
+      },
+      "env": {
+        "VITE_API_BASE_URL": "$services.api.url"
+      },
+      "flows": [
         {
-          "screenshot": "Initial screen",
-          "expect": {
-            "noConsoleErrors": true
-          }
-        },
-        {
-          "id": "no_horizontal_overflow",
-          "type": "assert_no_horizontal_overflow"
-        },
-        {
-          "id": "main_in_viewport",
-          "type": "assert_in_viewport",
-          "selector": "main"
+          "id": "smoke",
+          "label": "Smoke",
+          "scenarios": ["happy_path"],
+          "steps": [
+            {"visit": "/"},
+            {
+              "screenshot": "Initial screen",
+              "expect": {
+                "noConsoleErrors": true
+              }
+            },
+            {
+              "id": "no_horizontal_overflow",
+              "type": "assert_no_horizontal_overflow"
+            },
+            {
+              "id": "main_in_viewport",
+              "type": "assert_in_viewport",
+              "selector": "main"
+            }
+          ]
         }
       ]
     }
-  ]
+  },
+  "viewports": ["desktop"]
 }

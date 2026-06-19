@@ -40,11 +40,11 @@ npx layout-qa check --target-url http://localhost:5173 --scenario happy_path --o
 
 Frontend agents and developers can move faster when they have a visual feedback loop they can run themselves. Layout gives the repo a small protocol:
 
-- Declare any QA data/API service the app needs in `.layout/qa.json`.
+- Declare each runnable frontend in `.layout/qa.json` under `apps`.
 - Point the frontend API base URL at `$services.api.url` or any other named service URL.
 - Wire auth and unavoidable SDK behavior behind whatever QA env flag your app already understands.
 - Switch response states with `localStorage["layout.qa.scenario"]`.
-- Declare high-value browser flows in `.layout/qa.json`.
+- Declare high-value browser flows under the app they exercise.
 - Run the CLI locally or in GitHub Actions and inspect the generated screenshots/report.
 
 The goal is not to replace Playwright. The goal is to make the browser QA loop simple enough for a team or coding agent to run before frontend changes merge.
@@ -108,15 +108,15 @@ npx @trylayout/qa check \
   --open
 ```
 
-If `.layout/qa.json` contains an `app` block, run the whole local scripted
+If `.layout/qa.json` contains an `apps` block, run the whole local scripted
 session from one command:
 
 ```bash
 npx @trylayout/qa check --start-app --skip-install --open
 ```
 
-That starts every declared `services` entry, starts the app with the
-manifest `app.start` command, runs manifest flows, writes the report, and shuts
+That starts every service declared by the selected app, starts the app with the
+manifest `apps.<name>.start` command, runs manifest flows, writes the report, and shuts
 the child processes down when finished or interrupted.
 
 Each run writes:
@@ -170,7 +170,8 @@ Options:
 --target-url <url>     URL of the running frontend to test.
 --scenario <name>      Scenario to activate. Defaults to happy_path.
 --flows <path>         Flow manifest path. Defaults to .layout/qa.json.
---mock-root <path>     Mock service root. Defaults from .layout/qa.json services.api.root.
+--app <name>           App key from manifest apps.<name>.
+--mock-root <path>     Mock service root. Defaults from .layout/qa.json apps.<app>.services.api.root.
 --port <number>        Port for mock-api or a single service. Defaults to an available local port.
 --out <path>           Artifact directory. Defaults to .layout/runs.
 --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
@@ -196,52 +197,52 @@ Options:
 ## Flow Manifest
 
 Default path: `.layout/qa.json` in the current working directory. In monorepos,
-run Layout QA from the package/app directory you want to test, or pass
-`--flows <path>` explicitly for a different manifest.
+keep one repo-level manifest and declare each runnable frontend under `apps`.
+Use `--app <name>` when you want to select a specific app locally.
 
 ```json
 {
   "version": 1,
-  "services": {
-    "api": {
-      "type": "mock",
-      "root": ".layout/api",
-      "scenario": "happy_path"
-    }
-  },
-  "app": {
-    "root": ".",
-    "install": "npm ci",
-    "start": "npm run dev -- --host 127.0.0.1 --port $PORT",
-    "healthUrl": "http://127.0.0.1:$PORT/",
-    "env": {
-      "VITE_API_BASE_URL": "$services.api.url"
-    }
-  },
-  "viewports": ["desktop"],
-  "flows": [
-    {
-      "id": "workspace_smoke",
-      "label": "Workspace smoke",
-      "scenarios": ["happy_path"],
-      "steps": [
-        {"visit": "/"},
-        {"screenshot": "Workspace loaded", "expect": {"text": ["Dashboard"]}},
-        {"click": "[data-layout-qa='open-settings']"},
-        {"screenshot": "Settings open", "expect": {"text": ["Settings"]}}
+  "apps": {
+    "app": {
+      "root": ".",
+      "install": "npm ci",
+      "start": "npm run dev -- --host 127.0.0.1 --port $PORT",
+      "healthUrl": "http://127.0.0.1:$PORT/",
+      "services": {
+        "api": {
+          "type": "mock",
+          "root": ".layout/api",
+          "scenario": "happy_path"
+        }
+      },
+      "env": {
+        "VITE_API_BASE_URL": "$services.api.url"
+      },
+      "flows": [
+        {
+          "id": "workspace_smoke",
+          "label": "Workspace smoke",
+          "scenarios": ["happy_path"],
+          "steps": [
+            {"visit": "/"},
+            {"screenshot": "Workspace loaded", "expect": {"text": ["Dashboard"]}},
+            {"click": "[data-layout-qa='open-settings']"},
+            {"screenshot": "Settings open", "expect": {"text": ["Settings"]}}
+          ]
+        }
       ]
     }
-  ]
+  },
+  "viewports": ["desktop"]
 }
 ```
 
 Top-level fields:
 
 - `version`: currently `1`.
-- `services`: optional named QA services. Layout starts these before the app and exposes each URL as `$services.<name>.url`.
-- `app`: optional for local CLI-only runs, required for Layout-managed branch runs. Defines how to install and start the frontend.
+- `apps`: required map of runnable frontend apps. Each app owns its `root`, `start`, `env`, optional `services`, and optional `flows`.
 - `viewports`: optional default viewport labels for hosted/CI integrations.
-- `flows`: array of flow definitions.
 
 Service types:
 
@@ -253,27 +254,29 @@ Command services use the same lifecycle as the app:
 
 ```json
 {
-  "services": {
-    "api": {
-      "type": "command",
-      "root": "api",
-      "install": "npm ci",
-      "start": "npm run qa -- --host 127.0.0.1 --port $PORT",
-      "healthUrl": "http://127.0.0.1:$PORT/health",
+  "apps": {
+    "app": {
+      "services": {
+        "api": {
+          "type": "command",
+          "root": "api",
+          "install": "npm ci",
+          "start": "npm run qa -- --host 127.0.0.1 --port $PORT",
+          "healthUrl": "http://127.0.0.1:$PORT/health",
+          "env": {
+            "QA_MODE": "true"
+          }
+        }
+      },
       "env": {
-        "QA_MODE": "true"
+        "VITE_API_BASE_URL": "$services.api.url"
       }
-    }
-  },
-  "app": {
-    "env": {
-      "VITE_API_BASE_URL": "$services.api.url"
     }
   }
 }
 ```
 
-Layout does not require a specific QA flag name. `app.env` and service `env`
+Layout does not require a specific QA flag name. `apps.<name>.env` and service `env`
 are whatever the app/server understands.
 
 ## Mock API Scenarios
@@ -557,15 +560,15 @@ Goal:
 Create a browser QA loop that works locally and can also be used by Layout remote branch runs.
 
 Rules:
-- Use manifest `services` to declare how QA API/data responses are served.
+- Use each manifest app’s `services` to declare how QA API/data responses are served.
 - Do not require a hosted Layout service for local scripted checks.
 - Keep built-in mock response fixtures in .layout/api/scenarios.
 - Gate auth, SDKs, and unsafe writes behind whatever QA env flag this app already understands.
-- Point the frontend API base URL at $services.api.url in .layout/qa.json app.env.
+- Point the frontend API base URL at $services.api.url in that app’s env.
 - Hide any local QA switcher or debug controls when sessionStorage["layout.qa.runner"] === "1".
 
 Implementation:
-- Add .layout/api/scenarios/happy_path.json, empty.json, and error.json with fake deterministic API responses, or add a services.api command that starts this repo's own QA backend.
+- Add .layout/api/scenarios/happy_path.json, empty.json, and error.json with fake deterministic API responses, or add an apps.<app>.services.api command that starts this repo's own QA backend.
 - If the app has a central auth/session abstraction, add a deterministic QA user only when the Layout QA env flag is enabled.
 - If auth is scattered or provider-SDK-only, leave a clear note in the PR/code comments and start with public or logged-out flows.
 - Add .layout/qa.json with one smoke flow for the most important page.

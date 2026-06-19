@@ -153,9 +153,9 @@ export function selectFlowFromManifest(raw: unknown, scenario: string) {
   return selectFlowsFromManifest(raw, scenario)[0] || null;
 }
 
-export function selectFlowsFromManifest(raw: unknown, scenario: string) {
-  if (!isRecord(raw) || !Array.isArray(raw.flows)) return [];
-  const flows = raw.flows
+function parseFlowsFromValue(rawFlows: unknown, scenario: string) {
+  if (!Array.isArray(rawFlows)) return [];
+  const flows = rawFlows
     .map((flow, index) => normalizeFlow(flow, index))
     .filter((flow): flow is QaFlowDefinition => Boolean(flow));
   if (flows.length === 0) return [];
@@ -166,13 +166,55 @@ export function selectFlowsFromManifest(raw: unknown, scenario: string) {
   return selected.length ? selected : [flows[0]];
 }
 
-export function parseFlowManifestContent(content: string, scenario: string) {
-  const flow = selectFlowFromManifest(JSON.parse(content), scenario);
+function selectedManifestApp(raw: unknown, appName?: string) {
+  if (!isRecord(raw) || !isRecord(raw.apps)) return null;
+  const entries = Object.entries(raw.apps).filter(([, app]) => isRecord(app));
+  if (entries.length === 0) return null;
+
+  if (appName) {
+    const match = entries.find(([name]) => name === appName);
+    return match && isRecord(match[1]) ? match[1] : null;
+  }
+
+  if (entries.length === 1 && isRecord(entries[0][1])) return entries[0][1];
+
+  const defaultApp = entries.find(
+    ([, app]) => isRecord(app) && app.default === true
+  );
+  if (defaultApp && isRecord(defaultApp[1])) return defaultApp[1];
+
+  const namedApp = entries.find(([name]) => name === 'app');
+  return namedApp && isRecord(namedApp[1]) ? namedApp[1] : null;
+}
+
+function parseFlowsFromManifest(raw: unknown, scenario: string, appName?: string) {
+  const app = selectedManifestApp(raw, appName);
+  return parseFlowsFromValue(app?.flows, scenario);
+}
+
+export function selectFlowsFromManifest(
+  raw: unknown,
+  scenario: string,
+  appName?: string
+) {
+  return parseFlowsFromManifest(raw, scenario, appName);
+}
+
+export function parseFlowManifestContent(
+  content: string,
+  scenario: string,
+  appName?: string
+) {
+  const flow = selectFlowsFromManifest(JSON.parse(content), scenario, appName)[0];
   return flow ? ({...flow, source: 'manifest'} as LoadedQaFlow) : null;
 }
 
-export function parseFlowsManifestContent(content: string, scenario: string) {
-  return selectFlowsFromManifest(JSON.parse(content), scenario).map(
+export function parseFlowsManifestContent(
+  content: string,
+  scenario: string,
+  appName?: string
+) {
+  return selectFlowsFromManifest(JSON.parse(content), scenario, appName).map(
     flow => ({...flow, source: 'manifest'} as LoadedQaFlow)
   );
 }
@@ -209,7 +251,11 @@ export async function resolveDefaultPath(defaultPath: string) {
   return cwdPath;
 }
 
-export async function loadFlow(input: {flowsPath: string; scenario: string}) {
+export async function loadFlow(input: {
+  flowsPath: string;
+  scenario: string;
+  app?: string;
+}) {
   const loaded = await loadFlows(input);
   return {
     flow: loaded.flows[0],
@@ -218,7 +264,11 @@ export async function loadFlow(input: {flowsPath: string; scenario: string}) {
   };
 }
 
-export async function loadFlows(input: {flowsPath: string; scenario: string}) {
+export async function loadFlows(input: {
+  flowsPath: string;
+  scenario: string;
+  app?: string;
+}) {
   const manifestPath = input.flowsPath
     ? path.resolve(process.cwd(), input.flowsPath)
     : await resolveDefaultPath(FLOW_MANIFEST_PATH);
@@ -236,7 +286,9 @@ export async function loadFlows(input: {flowsPath: string; scenario: string}) {
     };
   }
 
-  const flows = parseFlowsManifestContent(content, input.scenario);
+  const flows = parseFlowsFromManifest(JSON.parse(content), input.scenario, input.app).map(
+    flow => ({...flow, source: 'manifest'} as LoadedQaFlow)
+  );
   return {
     flows: flows.length ? flows : [defaultFlow()],
     manifestPath,
@@ -247,40 +299,42 @@ export async function loadFlows(input: {flowsPath: string; scenario: string}) {
 export function starterFlowManifest() {
   return {
     version: 1,
-    services: {
-      api: {
-        type: 'mock',
-        root: '.layout/api',
-        scenario: 'happy_path',
-      },
-    },
-    app: {
-      root: '.',
-      install: 'npm ci',
-      start: 'npm run dev -- --host 127.0.0.1 --port $PORT',
-      healthUrl: 'http://127.0.0.1:$PORT/',
-      env: {
-        VITE_API_BASE_URL: '$services.api.url',
-      },
-    },
-    viewports: ['desktop'],
-    flows: [
-      {
-        id: 'smoke',
-        label: 'Smoke',
-        scenarios: ['happy_path'],
-        steps: [
-          {
-            visit: '/',
+    apps: {
+      app: {
+        root: '.',
+        install: 'npm ci',
+        start: 'npm run dev -- --host 127.0.0.1 --port $PORT',
+        healthUrl: 'http://127.0.0.1:$PORT/',
+        services: {
+          api: {
+            type: 'mock',
+            root: '.layout/api',
+            scenario: 'happy_path',
           },
+        },
+        env: {
+          VITE_API_BASE_URL: '$services.api.url',
+        },
+        flows: [
           {
-            screenshot: 'Initial screen',
-            expect: {
-              noConsoleErrors: true,
-            },
+            id: 'smoke',
+            label: 'Smoke',
+            scenarios: ['happy_path'],
+            steps: [
+              {
+                visit: '/',
+              },
+              {
+                screenshot: 'Initial screen',
+                expect: {
+                  noConsoleErrors: true,
+                },
+              },
+            ],
           },
         ],
       },
-    ],
+    },
+    viewports: ['desktop'],
   };
 }

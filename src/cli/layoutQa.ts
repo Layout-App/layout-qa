@@ -39,6 +39,7 @@ type CliOptions = {
   command: string;
   intentText: string;
   flowNames: string[];
+  app: string;
   targetUrl: string;
   scenario: string;
   flowsPath: string;
@@ -100,7 +101,7 @@ Commands:
   status                Check a queued/running/completed remote run.
   check                 Run local/CI scripted manifest checks.
   install-browsers      Install Chromium for local/CI browser checks.
-  mock-api              Start a Layout mock service from manifest services.api.
+  mock-api              Start a Layout mock service from manifest apps.<app>.services.api.
   run                   Run browser QA and write a local HTML report.
   remote run            Ask Layout to run browser QA against a repo/ref.
   remote status         Check a queued/running/completed remote run.
@@ -109,7 +110,8 @@ Options:
   --target-url <url>     URL of the running frontend to test.
   --scenario <name>      Scenario to activate. Defaults to happy_path.
   --flows <path>         Flow manifest path. Defaults to .layout/qa.json.
-  --mock-root <path>     Mock service root. Defaults from .layout/qa.json services.api.root.
+  --app <name>           App key from manifest apps.<name>.
+  --mock-root <path>     Mock service root. Defaults from .layout/qa.json apps.<app>.services.api.root.
   --port <number>        Port for mock-api or a single service. Defaults to an available local port.
   --out <path>           Artifact directory. Defaults to .layout/runs.
   --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
@@ -153,6 +155,7 @@ const VALUE_FLAGS = new Set([
   '--target-url',
   '--scenario',
   '--flows',
+  '--app',
   '--mock-root',
   '--port',
   '--out',
@@ -221,6 +224,7 @@ function parseArgs(args: string[]): CliOptions {
         ? readFlag(args, '--intent') || positional[0] || envValue('LAYOUT_INTENT')
         : readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
     flowNames: command === 'check' ? positional : [],
+    app: readFlag(args, '--app') || envValue('LAYOUT_QA_APP'),
     targetUrl: readFlag(args, '--target-url'),
     scenario: readFlag(args, '--scenario') || 'happy_path',
     flowsPath: readFlag(args, '--flows'),
@@ -286,11 +290,13 @@ async function exists(filePath: string) {
 }
 
 type AppConfig = {
+  name: string;
   root: string;
   install?: string;
   start: string;
   healthUrl?: string;
   env: Record<string, string>;
+  services: Record<string, unknown>;
 };
 
 type ServiceConfig = {
@@ -344,16 +350,47 @@ async function readManifest(manifestPath: string) {
   return content ? (JSON.parse(content) as Record<string, unknown>) : null;
 }
 
-async function loadAppConfig(manifestPath: string) {
+function selectManifestApp(
+  manifest: Record<string, unknown>,
+  manifestPath: string,
+  appName?: string
+): {name: string; config: Record<string, unknown>} | null {
+  if (!isRecord(manifest.apps)) return null;
+  const entries = Object.entries(manifest.apps).filter(
+    (entry): entry is [string, Record<string, unknown>] => isRecord(entry[1])
+  );
+  if (entries.length === 0) return null;
+
+  if (appName) {
+    const match = entries.find(([name]) => name === appName);
+    return match ? {name: match[0], config: match[1]} : null;
+  }
+
+  if (entries.length === 1) return {name: entries[0][0], config: entries[0][1]};
+
+  const defaultApp = entries.find(([, app]) => app.default === true);
+  if (defaultApp) return {name: defaultApp[0], config: defaultApp[1]};
+
+  const namedApp = entries.find(([name]) => name === 'app');
+  if (namedApp) return {name: namedApp[0], config: namedApp[1]};
+
+  throw new Error(
+    `Multiple apps found in ${manifestPath}. Pass --app <name> to choose one.`
+  );
+}
+
+async function loadAppConfig(manifestPath: string, appName?: string) {
   const manifest = await readManifest(manifestPath);
   if (!manifest) return null;
-  if (!isRecord(manifest.app)) return null;
+  const selected = selectManifestApp(manifest, manifestPath, appName);
+  if (!selected) return null;
 
-  const app = manifest.app;
+  const app = selected.config;
   const start = typeof app.start === 'string' ? app.start.trim() : '';
   if (!start) return null;
 
   return {
+    name: selected.name,
     root: typeof app.root === 'string' && app.root.trim() ? app.root.trim() : '.',
     install:
       typeof app.install === 'string' && app.install.trim()
@@ -365,14 +402,15 @@ async function loadAppConfig(manifestPath: string) {
         ? app.healthUrl.trim()
         : undefined,
     env: stringRecord(app.env),
+    services: isRecord(app.services) ? app.services : {},
   } satisfies AppConfig;
 }
 
-async function loadServiceConfigs(manifestPath: string) {
-  const manifest = await readManifest(manifestPath);
-  if (!manifest || !isRecord(manifest.services)) return [];
+async function loadServiceConfigs(manifestPath: string, appName?: string) {
+  const app = await loadAppConfig(manifestPath, appName);
+  if (!app) return [];
 
-  return Object.entries(manifest.services)
+  return Object.entries(app.services)
     .map(([name, raw]): ServiceConfig | null => {
       if (!isRecord(raw)) return null;
       const type = raw.type === 'command' || raw.type === 'external' ? raw.type : 'mock';
@@ -638,7 +676,7 @@ async function startServices(input: {
   manifestPath: string;
   options: CliOptions;
 }) {
-  const configs = await loadServiceConfigs(input.manifestPath);
+  const configs = await loadServiceConfigs(input.manifestPath, input.options.app);
   const running: RunningService[] = [];
 
   try {
@@ -709,6 +747,17 @@ async function startLocalCheckSession(input: {
     }
   };
 
+  const app = input.options.startApp
+    ? await loadAppConfig(input.manifestPath, input.options.app)
+    : null;
+
+  if (input.options.startApp && !app) {
+    await close();
+    throw new Error(
+      '--start-app requires an apps.<name>.start block in .layout/qa.json.'
+    );
+  }
+
   if (input.options.startApp || input.options.serveMocks) {
     services.push(
       ...(await startServices({
@@ -729,11 +778,10 @@ async function startLocalCheckSession(input: {
     } satisfies LocalCheckSession;
   }
 
-  const app = await loadAppConfig(input.manifestPath);
   if (!app) {
     await close();
     throw new Error(
-      '--start-app requires an app.start block in .layout/qa.json.'
+      '--start-app requires an apps.<name>.start block in .layout/qa.json.'
     );
   }
 
@@ -853,6 +901,7 @@ async function mockApiCommand(options: CliOptions) {
   const manifestConfig = await loadQaMockApiConfig({
     manifestPath,
     scenario: options.scenario,
+    app: options.app,
   });
   const root = options.mockRoot
     ? path.resolve(process.cwd(), options.mockRoot)
@@ -860,7 +909,7 @@ async function mockApiCommand(options: CliOptions) {
 
   if (!root) {
     throw new Error(
-      'No mock service root found. Add services.api with type "mock" to .layout/qa.json or pass --mock-root.'
+      'No mock service root found. Add apps.<app>.services.api with type "mock" to .layout/qa.json or pass --mock-root.'
     );
   }
 
@@ -1276,6 +1325,7 @@ async function runBrowserChecks(input: {options: CliOptions; targetUrl: string})
   const {flows, manifestPath, manifestFound} = await loadFlows({
     flowsPath: input.options.flowsPath,
     scenario: input.options.scenario,
+    app: input.options.app,
   });
   const selectedFlows = filterFlows(
     flows,
