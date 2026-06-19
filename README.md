@@ -16,7 +16,8 @@ npx @trylayout/qa test "test checkout recovery" --repo owner/repo --ref feature-
 ```
 
 Local scripted checks require no account, hosted service, or external docs.
-Hosted uploads and remote AI tests require a Layout organization API key.
+Remote AI tests require a Layout organization API key and create persisted,
+shareable Layout reports.
 
 ## Example Report
 
@@ -178,15 +179,12 @@ Options:
 --open                 Open the generated local HTML report after the run.
 --json                 Print machine-readable JSON.
 --api-url <url>        Layout API base URL. Defaults to https://api.trylayout.com/v1/qa.
---api-key <key>        Layout organization API key for uploads and remote runs.
---upload-url <url>     Upload completed run JSON/screenshots to Layout.
+--api-key <key>        Layout organization API key for remote runs.
 --repo <name>          Repository full name, e.g. owner/repo.
 --branch <name>        Branch name for report metadata.
 --ref <name>           Branch/ref for a remote run. Defaults to --branch.
---commit-sha <sha>     Commit SHA for report metadata.
---pr-number <number>   Pull request number for report metadata.
---run-id <id>          Existing Layout run id to update after workflow_dispatch.
---run-source <value>   local or github_actions. Defaults from environment.
+--commit-sha <sha>     Commit SHA for remote run metadata.
+--run-id <id>          Remote Layout run id for status checks.
 --mode <value>         scripted or ai. Defaults to ai for remote run.
 --intent <text>        Natural-language intent for AI testing remote runs.
 --start-app            Start the app from .layout/qa.json before local checks.
@@ -491,36 +489,23 @@ Presets:
 
 The selected viewport is written to `result.json`, shown in the HTML report, and included in the run directory name.
 
-## Hosted Reports
+## Local Reports And Remote Runs
 
-The CLI is local-first. If you have a Layout organization API key, the same run can upload screenshots and report metadata to a hosted Layout report:
+The CLI is local-first for `check` and `run`: it writes HTML, JSON, and screenshots under `.layout/runs` and does not upload local run data to Layout.
 
-```bash
-npx @trylayout/qa check \
-  --target-url http://localhost:5173 \
-  --upload-url https://api.trylayout.com/v1/qa/uploads \
-  --api-key "$LAYOUT_API_KEY" \
-  --repo owner/repo \
-  --branch "$BRANCH_NAME" \
-  --commit-sha "$COMMIT_SHA"
-```
+Use `test` when you want a persisted, shareable Layout report. Remote runs are executed by Layout against a connected repo/ref so the stored report has reproducible environment metadata.
 
 Environment fallbacks:
 
-- `LAYOUT_UPLOAD_URL`
 - `LAYOUT_API_URL`
 - `LAYOUT_API_KEY`
 - `LAYOUT_REPOSITORY`
 - `LAYOUT_REF`
 - `LAYOUT_BRANCH`
 - `LAYOUT_COMMIT_SHA`
-- `LAYOUT_PR_NUMBER`
-- `LAYOUT_RUN_SOURCE`
 - `LAYOUT_INTENT`
 
-In GitHub Actions, the CLI also reads `GITHUB_REPOSITORY`, `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, `GITHUB_SHA`, `GITHUB_REF`, and `GITHUB_EVENT_PATH` when explicit flags are not provided.
-
-If `--upload-url` is provided, `--api-key` is required. Upload failures make the CLI exit nonzero.
+In GitHub Actions, the CLI also reads `GITHUB_REPOSITORY`, `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, `GITHUB_SHA`, and `GITHUB_REF` when explicit flags are not provided.
 
 ## Remote AI Testing
 
@@ -615,9 +600,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx @trylayout/qa install-browsers
-      - run: npx @trylayout/qa check --start-app --scenario happy_path --run-source github_actions --upload-url https://api.trylayout.com/v1/qa/uploads --api-key "$LAYOUT_API_KEY"
-        env:
-          LAYOUT_API_KEY: ${{ secrets.LAYOUT_API_KEY }}
+      - run: npx @trylayout/qa check --start-app --scenario happy_path
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -635,7 +618,7 @@ This package is intentionally small:
 - It does support explicit viewport sizing.
 - It does support lightweight layout assertions.
 - It does support manifest-driven local app startup with `check --start-app`.
-- It does support hosted uploads and remote AI test requests when given a Layout API key.
+- It does support remote AI test requests when given a Layout API key.
 - It does not perform AI review locally by itself.
 
 The hosted Layout service owns remote AI browser testing and shared run reports;

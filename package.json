@@ -1,6 +1,6 @@
 {
   "name": "@trylayout/qa",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Local browser QA runner and HTML reports for AI-built frontends.",
   "license": "MIT",
   "author": "Layout",

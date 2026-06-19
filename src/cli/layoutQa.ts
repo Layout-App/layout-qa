@@ -47,13 +47,10 @@ type CliOptions = {
   outDir: string;
   apiUrl: string;
   apiKey: string;
-  uploadUrl: string;
   repo: string;
   branch: string;
   commitSha: string;
-  prNumber: string;
   runId: string;
-  runSource: 'local' | 'github_actions';
   mode: 'scripted' | 'exploratory';
   intent: string;
   workflowId: string;
@@ -121,15 +118,12 @@ Options:
   --open                 Open the generated local HTML report after the run.
   --json                 Print machine-readable JSON.
   --api-url <url>        Layout API base URL. Defaults to https://api.trylayout.com/v1/qa.
-  --api-key <key>        Layout organization API key for uploads and remote runs.
-  --upload-url <url>     Upload completed run JSON/screenshots to Layout.
+  --api-key <key>        Layout organization API key for remote runs.
   --repo <name>          Repository full name, e.g. owner/repo.
   --branch <name>        Branch name for report metadata.
   --ref <name>           Branch/ref for a remote run. Defaults to --branch.
-  --commit-sha <sha>     Commit SHA for report metadata.
-  --pr-number <number>   Pull request number for report metadata.
-  --run-id <id>          Existing Layout run id to update after workflow_dispatch.
-  --run-source <value>   local or github_actions. Defaults from environment.
+  --commit-sha <sha>     Commit SHA for remote run metadata.
+  --run-id <id>          Remote Layout run id for status checks.
   --mode <value>         scripted or ai. Defaults to ai for remote run.
   --intent <text>        Natural-language intent for AI testing remote runs.
   --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
@@ -166,14 +160,11 @@ const VALUE_FLAGS = new Set([
   '--timeout',
   '--api-url',
   '--api-key',
-  '--upload-url',
   '--repo',
   '--branch',
   '--ref',
   '--commit-sha',
-  '--pr-number',
   '--run-id',
-  '--run-source',
   '--mode',
   '--intent',
   '--workflow-id',
@@ -190,21 +181,6 @@ function positionalArgs(args: string[], startIndex: number) {
     positional.push(arg);
   }
   return positional;
-}
-
-async function githubEventPullRequestNumber() {
-  const eventPath = envValue('GITHUB_EVENT_PATH');
-  if (!eventPath) return '';
-  const content = await fs.readFile(eventPath, 'utf8').catch(() => '');
-  if (!content) return '';
-  const event = JSON.parse(content) as {pull_request?: {number?: number}};
-  return event.pull_request?.number ? String(event.pull_request.number) : '';
-}
-
-function inferGithubPrNumber() {
-  const ref = envValue('GITHUB_REF');
-  const match = ref.match(/^refs\/pull\/(\d+)\//);
-  return match?.[1] || '';
 }
 
 function inferBranch() {
@@ -227,10 +203,6 @@ function parseArgs(args: string[]): CliOptions {
   const parsedTimeoutMs = timeoutValue ? Number(timeoutValue) : undefined;
   const portValue = readFlag(args, '--port');
   const parsedPort = portValue ? Number(portValue) : undefined;
-  const rawRunSource =
-    readFlag(args, '--run-source') ||
-    envValue('LAYOUT_RUN_SOURCE') ||
-    (envValue('GITHUB_ACTIONS') === 'true' ? 'github_actions' : 'local');
 
   if (
     timeoutValue &&
@@ -262,7 +234,6 @@ function parseArgs(args: string[]): CliOptions {
     apiKey:
       readFlag(args, '--api-key') ||
       envValue('LAYOUT_API_KEY'),
-    uploadUrl: readFlag(args, '--upload-url') || envValue('LAYOUT_UPLOAD_URL'),
     repo:
       readFlag(args, '--repo') ||
       envValue('LAYOUT_REPOSITORY') ||
@@ -277,17 +248,12 @@ function parseArgs(args: string[]): CliOptions {
       readFlag(args, '--commit-sha') ||
       envValue('LAYOUT_COMMIT_SHA') ||
       envValue('GITHUB_SHA'),
-    prNumber:
-      readFlag(args, '--pr-number') ||
-      envValue('LAYOUT_PR_NUMBER') ||
-      inferGithubPrNumber(),
     runId:
       readFlag(args, '--run-id') ||
       (command === 'status' || command === 'remote-status'
         ? positional[0]
         : '') ||
       envValue('LAYOUT_RUN_ID'),
-    runSource: rawRunSource === 'github_actions' ? 'github_actions' : 'local',
     mode:
       command === 'test'
         ? 'exploratory'
@@ -1171,19 +1137,6 @@ function filterFlows(
   return selected;
 }
 
-function readFileAsDataUrl(filePath: string) {
-  return fs.readFile(filePath).then(buffer => {
-    const ext = path.extname(filePath).toLowerCase();
-    const mimeType =
-      ext === '.html'
-        ? 'text/html'
-        : ext === '.json'
-          ? 'application/json'
-          : 'image/jpeg';
-    return `data:${mimeType};base64,${buffer.toString('base64')}`;
-  });
-}
-
 type JsonResponseParseResult =
   | {ok: true; body: Record<string, unknown>}
   | {ok: false; error: string};
@@ -1319,50 +1272,6 @@ function getJson(input: {url: string; token: string}) {
   });
 }
 
-async function uploadRun(input: {
-  options: CliOptions;
-  result: QaTestRunResult;
-  artifacts: ArtifactSummary;
-  manifestPath: string;
-  manifestFound: boolean;
-  passed: boolean;
-}) {
-  if (!input.options.uploadUrl) return null;
-  if (!input.options.apiKey) {
-    throw new Error('--upload-url requires --api-key.');
-  }
-
-  const prNumber =
-    input.options.prNumber || (await githubEventPullRequestNumber());
-  const reportDataUrl = await readFileAsDataUrl(input.artifacts.reportPath);
-
-  return postJson({
-    url: input.options.uploadUrl,
-    token: input.options.apiKey,
-    body: {
-      status: input.passed ? 'passed' : 'failed',
-      runSource: input.options.runSource,
-      repository: input.options.repo,
-      branch: input.options.branch,
-      commitSha: input.options.commitSha,
-      prNumber: prNumber ? Number(prNumber) : undefined,
-      runId: input.options.runId,
-      scenario: input.options.scenario,
-      targetUrl: input.options.targetUrl,
-      startedAt: input.result.startedAt,
-      completedAt: input.result.completedAt,
-      durationMs: input.result.durationMs,
-      manifestPath: input.manifestPath,
-      manifestFound: input.manifestFound,
-      result: input.result,
-      report: {
-        fileName: 'index.html',
-        dataUrl: reportDataUrl,
-      },
-    },
-  });
-}
-
 async function runBrowserChecks(input: {options: CliOptions; targetUrl: string}) {
   const {flows, manifestPath, manifestFound} = await loadFlows({
     flowsPath: input.options.flowsPath,
@@ -1405,14 +1314,6 @@ async function runBrowserChecks(input: {options: CliOptions; targetUrl: string})
     result,
   });
   const passed = isQaRunPassed(result);
-  const uploadResponse = await uploadRun({
-    options: {...input.options, targetUrl: input.targetUrl},
-    result,
-    artifacts,
-    manifestPath,
-    manifestFound,
-    passed,
-  });
 
   if (input.options.json) {
     process.stdout.write(
@@ -1425,7 +1326,6 @@ async function runBrowserChecks(input: {options: CliOptions; targetUrl: string})
           manifestPath,
           manifestFound,
           artifacts,
-          upload: uploadResponse,
           result: resultForConsole(result),
         },
         null,
@@ -1445,12 +1345,6 @@ async function runBrowserChecks(input: {options: CliOptions; targetUrl: string})
 
   if (input.options.open) {
     await openReport(artifacts.reportPath);
-  }
-
-  if (uploadResponse && !input.options.json) {
-    process.stdout.write(
-      `Uploaded: ${String(uploadResponse.reportUrl || uploadResponse.runId)}\n`
-    );
   }
 
   process.exitCode = passed ? 0 : 1;
