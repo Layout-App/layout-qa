@@ -1355,6 +1355,48 @@ type JsonResponseParseResult =
   | {ok: true; body: Record<string, unknown>}
   | {ok: false; error: string};
 
+class HttpRequestError extends Error {
+  statusCode: number;
+  retryAfterMs?: number;
+
+  constructor(input: {
+    statusCode: number;
+    message: string;
+    retryAfterMs?: number;
+  }) {
+    super(input.message);
+    this.statusCode = input.statusCode;
+    this.retryAfterMs = input.retryAfterMs;
+  }
+}
+
+function retryAfterMs(headerValue: string | string[] | undefined) {
+  const value = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  const dateMs = Date.parse(value);
+  if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+  return undefined;
+}
+
+function requestFailure(input: {
+  statusCode?: number;
+  body: Record<string, unknown>;
+  rawBody: string;
+  retryAfterMs?: number;
+}) {
+  const statusCode = input.statusCode || 0;
+  const message = `Request failed (${statusCode || 'unknown'}): ${
+    input.body.message || input.body.error || input.rawBody
+  }`;
+  return new HttpRequestError({
+    statusCode,
+    message,
+    retryAfterMs: input.retryAfterMs,
+  });
+}
+
 function postJson(input: {
   url: string;
   token: string;
@@ -1399,11 +1441,12 @@ function postJson(input: {
           }
           if (!res.statusCode || res.statusCode >= 400) {
             reject(
-              new Error(
-                `Request failed (${res.statusCode || 'unknown'}): ${
-                  parsed.body.message || parsed.body.error || responseBody
-                }`
-              )
+              requestFailure({
+                statusCode: res.statusCode,
+                body: parsed.body,
+                rawBody: responseBody,
+                retryAfterMs: retryAfterMs(res.headers['retry-after']),
+              })
             );
             return;
           }
@@ -1469,11 +1512,12 @@ function getJson(input: {url: string; token: string}) {
           }
           if (!res.statusCode || res.statusCode >= 400) {
             reject(
-              new Error(
-                `Request failed (${res.statusCode || 'unknown'}): ${
-                  parsed.body.message || parsed.body.error || responseBody
-                }`
-              )
+              requestFailure({
+                statusCode: res.statusCode,
+                body: parsed.body,
+                rawBody: responseBody,
+                retryAfterMs: retryAfterMs(res.headers['retry-after']),
+              })
             );
             return;
           }
@@ -1666,7 +1710,24 @@ async function waitForRemoteRun(
       );
     }
     await sleep(5000);
-    response = await getRemoteRun(options, runId);
+    try {
+      response = await getRemoteRun(options, runId);
+    } catch (error) {
+      if (error instanceof HttpRequestError && error.statusCode === 429) {
+        const delayMs = error.retryAfterMs || 5000;
+        if (!options.json) {
+          process.stderr.write(
+            `Layout rate limit reached; retrying in ${Math.ceil(
+              delayMs / 1000
+            )}s\n`
+          );
+        }
+        await sleep(delayMs);
+        response = await getRemoteRun(options, runId);
+        continue;
+      }
+      throw error;
+    }
   }
 
   return response;
