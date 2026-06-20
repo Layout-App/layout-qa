@@ -83,27 +83,9 @@ Usage:
   trylayout run --target-url <url> [options]
   trylayout remote run --repo <owner/repo> --ref <branch> [options]
   trylayout remote status <run_id> [options]
-  layout-qa setup [options]
-  layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
-  layout-qa status <run_id> [options]
-  layout-qa check [flow_id ...] [options]
-  layout-qa mock-api [options]
-  layout-qa run --target-url <url> [options]
-  npx @trylayout/qa test "intent" --repo <owner/repo> --ref <branch> [options]
-  npx @trylayout/qa setup [options]
-  npx @trylayout/qa status <run_id> [options]
-  npx @trylayout/qa check [flow_id ...] [options]
-  npx @trylayout/qa install-browsers
-  npx @trylayout/qa mock-api [options]
-  npx @trylayout/qa run --target-url <url> [options]
-  npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
-  npx @trylayout/qa remote status <run_id> [options]
-  npx layout-qa setup [options]
-  npx layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
-  npx layout-qa status <run_id> [options]
-  npx layout-qa check [flow_id ...] [options]
-  npx layout-qa mock-api [options]
-  npx layout-qa run --target-url <url> [options]
+
+Use npx @trylayout/qa <command> when running without installing.
+layout-qa is an equivalent package alias.
 
 Commands:
   setup                Check remote QA setup and show API key instructions.
