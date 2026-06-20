@@ -34,6 +34,7 @@ import {formatViewport, parseViewport} from '../viewports';
 
 const requireFromHere = createRequire(__filename);
 const REMOTE_TEST_DOCS_URL = 'https://trylayout.com/docs/qa#remote-ai-tests';
+const WEB_SETUP_URL = 'https://app.trylayout.com/qa/setup';
 
 type CliOptions = {
   command: string;
@@ -61,6 +62,7 @@ type CliOptions = {
   startApp: boolean;
   serveMocks: boolean;
   skipInstall: boolean;
+  wait: boolean;
   json: boolean;
   open: boolean;
   force: boolean;
@@ -71,6 +73,7 @@ function printHelp() {
   process.stdout.write(`Layout QA CLI
 
 Usage:
+  trylayout setup [options]
   trylayout init [options]
   trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
   trylayout status <run_id> [options]
@@ -80,12 +83,14 @@ Usage:
   trylayout run --target-url <url> [options]
   trylayout remote run --repo <owner/repo> --ref <branch> [options]
   trylayout remote status <run_id> [options]
+  layout-qa setup [options]
   layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
   layout-qa status <run_id> [options]
   layout-qa check [flow_id ...] [options]
   layout-qa mock-api [options]
   layout-qa run --target-url <url> [options]
   npx @trylayout/qa test "intent" --repo <owner/repo> --ref <branch> [options]
+  npx @trylayout/qa setup [options]
   npx @trylayout/qa status <run_id> [options]
   npx @trylayout/qa check [flow_id ...] [options]
   npx @trylayout/qa install-browsers
@@ -93,9 +98,15 @@ Usage:
   npx @trylayout/qa run --target-url <url> [options]
   npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
   npx @trylayout/qa remote status <run_id> [options]
+  npx layout-qa setup [options]
+  npx layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
+  npx layout-qa status <run_id> [options]
+  npx layout-qa check [flow_id ...] [options]
+  npx layout-qa mock-api [options]
   npx layout-qa run --target-url <url> [options]
 
 Commands:
+  setup                Check remote QA setup and show API key instructions.
   init                  Write a starter .layout/qa.json.
   test                  Ask Layout to run AI browser QA remotely.
   status                Check a queued/running/completed remote run.
@@ -117,7 +128,7 @@ Options:
   --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
   --timeout <ms>         Browser run timeout. Defaults to LAYOUT_QA_TEST_TIMEOUT_MS or 60000.
   --headed               Show the browser instead of running headless.
-  --open                 Open the generated local HTML report after the run.
+  --open                 Open the web setup page or generated local HTML report.
   --json                 Print machine-readable JSON.
   --api-url <url>        Layout API base URL. Defaults to https://api.trylayout.com/v1/qa.
   --api-key <key>        Layout organization API key for remote runs.
@@ -129,6 +140,7 @@ Options:
   --mode <value>         scripted or ai. Defaults to ai for remote run.
   --intent <text>        Natural-language intent for AI testing remote runs.
   --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
+  --wait                 Wait for a remote run to finish before printing the result.
   --start-app            Start the app from .layout/qa.json before local checks.
   --serve-mocks          Start manifest services before local checks. Automatic with --start-app.
   --skip-install         With --start-app, skip app.install.
@@ -188,6 +200,87 @@ function positionalArgs(args: string[], startIndex: number) {
 
 function inferBranch() {
   return envValue('GITHUB_HEAD_REF') || envValue('GITHUB_REF_NAME');
+}
+
+function normalizeGithubRepository(remoteUrl: string) {
+  const trimmed = remoteUrl.trim();
+  const httpsMatch = trimmed.match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (!httpsMatch) return '';
+  return `${httpsMatch[1]}/${httpsMatch[2]}`;
+}
+
+function captureChildCommand(input: {
+  command: string;
+  args: string[];
+  cwd?: string;
+}) {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn(input.command, input.args, {
+      cwd: input.cwd,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let stdout = '';
+    child.stdout.on('data', chunk => {
+      stdout += String(chunk);
+    });
+    child.on('error', reject);
+    child.on('exit', code => {
+      if (code === 0) {
+        resolve(stdout.trim());
+        return;
+      }
+      reject(
+        new Error(
+          `Command failed (${code ?? 'signal'}): ${[
+            input.command,
+            ...input.args,
+          ].join(' ')}`
+        )
+      );
+    });
+  });
+}
+
+async function inferGitBranch() {
+  return captureChildCommand({
+    command: 'git',
+    args: ['rev-parse', '--abbrev-ref', 'HEAD'],
+    cwd: process.cwd(),
+  }).catch(() => '');
+}
+
+async function inferGitRepository() {
+  const remoteUrl = await captureChildCommand({
+    command: 'git',
+    args: ['config', '--get', 'remote.origin.url'],
+    cwd: process.cwd(),
+  }).catch(() => '');
+  return remoteUrl ? normalizeGithubRepository(remoteUrl) : '';
+}
+
+function openUrl(url: string) {
+  const command =
+    process.platform === 'darwin'
+      ? 'open'
+      : process.platform === 'win32'
+        ? 'cmd'
+        : 'xdg-open';
+  const args =
+    process.platform === 'darwin'
+      ? [url]
+      : process.platform === 'win32'
+        ? ['/c', 'start', '', url]
+        : [url];
+
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.once('error', reject);
+    child.unref();
+    resolve();
+  });
 }
 
 function parseArgs(args: string[]): CliOptions {
@@ -275,6 +368,7 @@ function parseArgs(args: string[]): CliOptions {
     startApp: hasFlag(args, '--start-app'),
     serveMocks: hasFlag(args, '--serve-mocks'),
     skipInstall: hasFlag(args, '--skip-install'),
+    wait: hasFlag(args, '--wait'),
     json: hasFlag(args, '--json'),
     open: hasFlag(args, '--open'),
     force: hasFlag(args, '--force'),
@@ -869,6 +963,95 @@ async function initCommand(options: CliOptions) {
   );
 }
 
+async function setupCommand(options: CliOptions) {
+  const manifestPath = options.flowsPath
+    ? path.resolve(process.cwd(), options.flowsPath)
+    : await resolveDefaultPath(FLOW_MANIFEST_PATH);
+  const manifestExists = await exists(manifestPath);
+  const repository = options.repo || (await inferGitRepository());
+  const ref = options.branch || (await inferGitBranch());
+  const hasApiKey = Boolean(options.apiKey);
+  const ready = Boolean(hasApiKey && repository && ref && manifestExists);
+  const nextTestCommand = [
+    'trylayout test "test this branch"',
+    repository ? `--repo ${repository}` : '--repo owner/repo',
+    ref ? `--ref ${ref}` : '--ref branch',
+    '--wait',
+    '--json',
+  ].join(' ');
+  const setup = {
+    ready,
+    checks: {
+      apiKey: hasApiKey,
+      repository: Boolean(repository),
+      ref: Boolean(ref),
+      manifest: manifestExists,
+    },
+    repository: repository || undefined,
+    ref: ref || undefined,
+    manifestPath,
+    setupUrl: WEB_SETUP_URL,
+    docsUrl: REMOTE_TEST_DOCS_URL,
+    nextCommands: {
+      setApiKey: 'export LAYOUT_API_KEY="lqa_key_..."',
+      initManifest: 'trylayout init',
+      test: nextTestCommand,
+    },
+  };
+
+  if (options.open) {
+    await openUrl(WEB_SETUP_URL).catch(error => {
+      process.stderr.write(
+        `Could not open ${WEB_SETUP_URL}: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`
+      );
+    });
+  }
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(setup, null, 2)}\n`);
+    process.exitCode = ready ? 0 : 1;
+    return;
+  }
+
+  process.stdout.write('Layout remote QA setup\n\n');
+  process.stdout.write(
+    `${hasApiKey ? '✓' : '•'} API key: ${
+      hasApiKey ? 'found in --api-key/LAYOUT_API_KEY' : 'missing'
+    }\n`
+  );
+  process.stdout.write(
+    `${repository ? '✓' : '•'} Repository: ${repository || 'not detected'}\n`
+  );
+  process.stdout.write(`${ref ? '✓' : '•'} Ref: ${ref || 'not detected'}\n`);
+  process.stdout.write(
+    `${manifestExists ? '✓' : '•'} Manifest: ${
+      manifestExists ? manifestPath : `${manifestPath} not found`
+    }\n\n`
+  );
+
+  if (!hasApiKey) {
+    process.stdout.write('Get an API key:\n');
+    process.stdout.write(`  ${WEB_SETUP_URL}\n\n`);
+    process.stdout.write('Then add it to your shell:\n');
+    process.stdout.write('  export LAYOUT_API_KEY="lqa_key_..."\n\n');
+  }
+  if (!manifestExists) {
+    process.stdout.write('Create a starter manifest:\n');
+    process.stdout.write('  trylayout init\n\n');
+  }
+  if (!repository || !ref) {
+    process.stdout.write('If repo/ref were not detected, pass them explicitly:\n');
+    process.stdout.write('  --repo owner/repo --ref branch\n\n');
+  }
+
+  process.stdout.write(`Docs: ${REMOTE_TEST_DOCS_URL}\n\n`);
+  process.stdout.write('Next command:\n');
+  process.stdout.write(`  ${nextTestCommand}\n`);
+  process.exitCode = ready ? 0 : 1;
+}
+
 async function installBrowsersCommand(options: CliOptions) {
   const playwrightPackagePath = requireFromHere.resolve('playwright/package.json');
   const playwrightCliPath = path.join(path.dirname(playwrightPackagePath), 'cli.js');
@@ -1434,11 +1617,77 @@ function apiEndpoint(baseUrl: string, pathName: string) {
   return `${baseUrl.replace(/\/+$/, '')}/${pathName.replace(/^\/+/, '')}`;
 }
 
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function remoteRunSetupError(missing: string[]) {
   return [
     `Layout remote test needs ${missing.join(', ')}.`,
     `Docs: ${REMOTE_TEST_DOCS_URL}`,
   ].join('\n');
+}
+
+function remoteRunRecord(response: Record<string, unknown>) {
+  return isRecord(response.run) ? response.run : response;
+}
+
+function remoteRunId(response: Record<string, unknown>) {
+  const run = remoteRunRecord(response);
+  return String(response.runId || run.id || response.id || '');
+}
+
+function remoteRunStatus(response: Record<string, unknown>) {
+  const run = remoteRunRecord(response);
+  return String(run.status || response.status || 'unknown');
+}
+
+function remoteRunIssueCount(response: Record<string, unknown>) {
+  const run = remoteRunRecord(response);
+  return Number(run.issueCount || response.issueCount || 0);
+}
+
+function isTerminalRemoteStatus(status: string) {
+  return ['passed', 'warning', 'failed', 'error', 'cancelled'].includes(status);
+}
+
+async function getRemoteRun(options: CliOptions, runId: string) {
+  return getJson({
+    url: apiEndpoint(options.apiUrl, `/remote-runs/${encodeURIComponent(runId)}`),
+    token: options.apiKey,
+  });
+}
+
+async function waitForRemoteRun(
+  options: CliOptions,
+  runId: string,
+  initialResponse: Record<string, unknown>
+) {
+  const timeoutMs = options.timeoutMs || 10 * 60 * 1000;
+  const startedAt = Date.now();
+  let response = initialResponse;
+
+  while (!isTerminalRemoteStatus(remoteRunStatus(response))) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(
+        `Timed out waiting for Layout run ${runId} after ${timeoutMs}ms.`
+      );
+    }
+    if (!options.json) {
+      const run = remoteRunRecord(response);
+      const phase = String(run.phase || response.phase || 'queued');
+      const message = String(run.phaseMessage || response.phaseMessage || '');
+      process.stderr.write(
+        `Layout run ${remoteRunStatus(response)} · ${phase}${
+          message ? ` · ${message}` : ''
+        }\n`
+      );
+    }
+    await sleep(5000);
+    response = await getRemoteRun(options, runId);
+  }
+
+  return response;
 }
 
 async function remoteRunCommand(options: CliOptions) {
@@ -1462,7 +1711,7 @@ async function remoteRunCommand(options: CliOptions) {
     throw new Error(remoteRunSetupError(missing));
   }
 
-  const response = await postJson({
+  let response = await postJson({
     url: apiEndpoint(options.apiUrl, '/remote-runs'),
     token: options.apiKey,
     body: {
@@ -1479,14 +1728,28 @@ async function remoteRunCommand(options: CliOptions) {
       workflowId: options.workflowId,
     },
   });
+  const runId = remoteRunId(response);
+
+  if (options.wait) {
+    if (!runId) throw new Error('Layout API did not return a run id.');
+    response = await waitForRemoteRun(options, runId, response);
+    const status = remoteRunStatus(response);
+    if (status !== 'passed' || remoteRunIssueCount(response) > 0) {
+      process.exitCode = 1;
+    }
+  }
 
   if (options.json) {
     process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
     return;
   }
 
-  process.stdout.write('Layout remote run queued\n');
-  process.stdout.write(`Run: ${String(response.runId || response.id || '')}\n`);
+  process.stdout.write(
+    options.wait
+      ? `Layout remote run ${remoteRunStatus(response)}\n`
+      : 'Layout remote run queued\n'
+  );
+  process.stdout.write(`Run: ${runId}\n`);
   if (response.runUrl || response.reportUrl) {
     process.stdout.write(
       `Report: ${String(response.runUrl || response.reportUrl)}\n`
@@ -1495,9 +1758,10 @@ async function remoteRunCommand(options: CliOptions) {
 }
 
 function remoteRunIssues(response: Record<string, unknown>) {
-  const run = response.run;
-  if (!run || typeof run !== 'object') return [];
-  const issues = (run as {issues?: unknown}).issues;
+  const run = remoteRunRecord(response);
+  const issues = (isRecord(response) && Array.isArray(response.issues)
+    ? response.issues
+    : (run as {issues?: unknown}).issues);
   return Array.isArray(issues) ? issues : [];
 }
 
@@ -1509,25 +1773,20 @@ async function remoteStatusCommand(options: CliOptions) {
     throw new Error(remoteRunSetupError(missing));
   }
 
-  const response = await getJson({
-    url: apiEndpoint(
-      options.apiUrl,
-      `/remote-runs/${encodeURIComponent(options.runId)}`
-    ),
-    token: options.apiKey,
-  });
+  const response = await getRemoteRun(options, options.runId);
 
   if (options.json) {
     process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
     return;
   }
 
-  const status = String(response.status || 'unknown');
-  const phase = String(response.phase || 'unknown');
-  const phaseStatus = String(response.phaseStatus || '');
-  const phaseMessage = String(response.phaseMessage || '');
-  const screenCount = Number(response.screenCount || 0);
-  const issueCount = Number(response.issueCount || 0);
+  const run = remoteRunRecord(response);
+  const status = remoteRunStatus(response);
+  const phase = String(run.phase || response.phase || 'unknown');
+  const phaseStatus = String(run.phaseStatus || response.phaseStatus || '');
+  const phaseMessage = String(run.phaseMessage || response.phaseMessage || '');
+  const screenCount = Number(run.screenCount || response.screenCount || 0);
+  const issueCount = Number(run.issueCount || response.issueCount || 0);
   process.stdout.write(`Layout remote run ${status}\n`);
   process.stdout.write(`Run: ${String(response.runId || options.runId)}\n`);
   process.stdout.write(
@@ -1571,6 +1830,11 @@ async function main() {
 
   if (options.command === 'init') {
     await initCommand(options);
+    return;
+  }
+
+  if (options.command === 'setup') {
+    await setupCommand(options);
     return;
   }
 

@@ -9,10 +9,11 @@ Layout QA is a browser QA protocol and runner for frontend changes. It runs dete
 The core loop is intentionally local:
 
 ```bash
+npx @trylayout/qa setup
 npx @trylayout/qa init
 npx @trylayout/qa check --start-app --skip-install --open
 npx @trylayout/qa check smoke --target-url http://localhost:5173 --scenario happy_path --open
-npx @trylayout/qa test "test checkout recovery" --repo owner/repo --ref feature-branch
+npx @trylayout/qa test "test checkout recovery" --repo owner/repo --ref feature-branch --json
 ```
 
 Local scripted checks require no account, hosted service, or external docs.
@@ -80,6 +81,15 @@ npx @trylayout/qa install-browsers
 
 ## Quick Start
 
+Check remote QA setup:
+
+```bash
+npx @trylayout/qa setup
+```
+
+If no API key is configured, setup prints the web setup URL, docs link, and the
+exact `LAYOUT_API_KEY` export command to run after copying the key.
+
 Create a starter flow manifest:
 
 ```bash
@@ -135,6 +145,7 @@ The process exits `0` on pass and `1` on failure, so the same command can run in
 ## Commands
 
 ```text
+trylayout setup [options]
 trylayout init [options]
 trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
 trylayout status <run_id> [options]
@@ -144,11 +155,13 @@ trylayout mock-api [options]
 trylayout run --target-url <url> [options]
 trylayout remote run --repo <owner/repo> --ref <branch> [options]
 trylayout remote status <run_id> [options]
+layout-qa setup [options]
 layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
 layout-qa status <run_id> [options]
 layout-qa check [flow_id ...] [options]
 layout-qa mock-api [options]
 layout-qa run --target-url <url> [options]
+npx @trylayout/qa setup [options]
 npx @trylayout/qa test "intent" --repo <owner/repo> --ref <branch> [options]
 npx @trylayout/qa status <run_id> [options]
 npx @trylayout/qa check [flow_id ...] [options]
@@ -157,6 +170,7 @@ npx @trylayout/qa mock-api [options]
 npx @trylayout/qa run --target-url <url> [options]
 npx @trylayout/qa remote run --repo <owner/repo> --ref <branch> [options]
 npx @trylayout/qa remote status <run_id> [options]
+npx layout-qa setup [options]
 npx layout-qa test "intent" --repo <owner/repo> --ref <branch> [options]
 npx layout-qa status <run_id> [options]
 npx layout-qa check [flow_id ...] [options]
