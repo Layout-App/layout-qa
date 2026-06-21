@@ -307,7 +307,7 @@ export function starterFlowManifest() {
         healthUrl: 'http://127.0.0.1:$PORT/',
         services: {
           api: {
-            type: 'mock',
+            type: 'generated',
             root: '.layout/api',
             scenario: 'happy_path',
           },

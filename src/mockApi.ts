@@ -241,7 +241,12 @@ export async function loadQaMockApiConfig(input: {
         entries.find(([name]) => name === 'app')?.[1];
   const services = isRecord(selectedApp?.services) ? selectedApp.services : {};
   const apiService = isRecord(services.api) ? services.api : null;
-  if (!apiService || apiService.type !== 'mock') return null;
+  if (
+    !apiService ||
+    (apiService.type !== 'mock' && apiService.type !== 'generated')
+  ) {
+    return null;
+  }
 
   const root =
     typeof apiService.root === 'string' ? apiService.root : '.layout/api';

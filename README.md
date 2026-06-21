@@ -207,7 +207,7 @@ Use `--app <name>` when you want to select a specific app locally.
       "healthUrl": "http://127.0.0.1:$PORT/",
       "services": {
         "api": {
-          "type": "mock",
+          "type": "generated",
           "root": ".layout/api",
           "scenario": "happy_path"
         }
@@ -323,7 +323,9 @@ export function apiFetch(path: string, options?: RequestInit) {
 }
 ```
 
-Auth, third-party SDKs, browser storage, and destructive writes may still need QA-mode guards because they cannot always be solved by a mock API server.
+Remote Layout runs can generate and persist API fixtures from the frontend code when a service uses `"type": "generated"`. The optional `.layout/api` fixtures above act as local seeds and keep local scripted checks runnable.
+
+Auth, third-party SDKs, browser storage, and destructive writes may still need QA-mode guards because they cannot always be solved by generated or mock API fixtures.
 
 ## What to Commit
 
@@ -558,19 +560,19 @@ Create a browser QA loop that works locally and can also be used by Layout remot
 Rules:
 - Use each manifest app’s `services` to declare how QA API/data responses are served.
 - Do not require a hosted Layout service for local scripted checks.
-- Keep built-in mock response fixtures in .layout/api/scenarios.
+- Prefer generated API fixtures for remote runs; keep optional local seed responses in .layout/api/scenarios only when they help local checks.
 - Gate auth, SDKs, and unsafe writes behind whatever QA env flag this app already understands.
 - Point the frontend API base URL at $services.api.url in that app’s env.
 - Hide any local QA switcher or debug controls when sessionStorage["layout.qa.runner"] === "1".
 
 Implementation:
-- Add .layout/api/scenarios/happy_path.json, empty.json, and error.json with fake deterministic API responses, or add an apps.<app>.services.api command that starts this repo's own QA backend.
+- In .layout/qa.json, prefer apps.<app>.services.api.type = "generated" for remote runs. Add optional fake seed responses in .layout/api/scenarios only when local checks need them, or use a command service for this repo's own QA backend.
 - If the app has a central auth/session abstraction, add a deterministic QA user only when the Layout QA env flag is enabled.
 - If auth is scattered or provider-SDK-only, leave a clear note in the PR/code comments and start with public or logged-out flows.
 - Add .layout/qa.json with one smoke flow for the most important page.
 - Prefer visible text and stable selectors.
 - Add screenshot checkpoints after meaningful user-visible states.
-- Commit .layout/qa.json, .layout/api/scenarios/*.json, and .layout/.gitignore.
+- Commit .layout/qa.json, optional .layout/api/scenarios/*.json seed data, and .layout/.gitignore.
 - Do not commit .layout/runs, secrets, production tokens, or real customer data.
 
 Run:

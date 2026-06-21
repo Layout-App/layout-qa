@@ -377,7 +377,7 @@ type AppConfig = {
 
 type ServiceConfig = {
   name: string;
-  type: 'mock' | 'command' | 'external';
+  type: 'mock' | 'command' | 'external' | 'generated';
   root: string;
   install?: string;
   start?: string;
@@ -489,11 +489,21 @@ async function loadServiceConfigs(manifestPath: string, appName?: string) {
   return Object.entries(app.services)
     .map(([name, raw]): ServiceConfig | null => {
       if (!isRecord(raw)) return null;
-      const type = raw.type === 'command' || raw.type === 'external' ? raw.type : 'mock';
+      const type =
+        raw.type === 'command' ||
+        raw.type === 'external' ||
+        raw.type === 'generated'
+          ? raw.type
+          : 'mock';
       return {
         name,
         type,
-        root: typeof raw.root === 'string' && raw.root.trim() ? raw.root.trim() : '.',
+        root:
+          typeof raw.root === 'string' && raw.root.trim()
+            ? raw.root.trim()
+            : type === 'mock' || type === 'generated'
+              ? '.layout/api'
+              : '.',
         install:
           typeof raw.install === 'string' && raw.install.trim()
             ? raw.install.trim()
@@ -1074,7 +1084,7 @@ async function mockApiCommand(options: CliOptions) {
 
   if (!root) {
     throw new Error(
-      'No mock service root found. Add apps.<app>.services.api with type "mock" to .layout/qa.json or pass --mock-root.'
+      'No mock service root found. Add apps.<app>.services.api with type "mock" or "generated" to .layout/qa.json, or pass --mock-root.'
     );
   }
 
