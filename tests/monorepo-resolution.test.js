@@ -106,7 +106,11 @@ async function main() {
                   {
                     id: 'entry_path_stability',
                     steps: [
-                      {visit: '/items/123'},
+                      {
+                        visit: '/items/123',
+                        screenshot: 'Item details direct entry',
+                        expectText: 'Item details',
+                      },
                       {type: 'reload', timeoutMs: 5000},
                       {
                         type: 'assert_stable_for',
@@ -116,6 +120,7 @@ async function main() {
                           noText: ['Loading item'],
                         },
                       },
+                      {expectText: ['Item details'], expectNoText: 'Loading item'},
                       {type: 'assert_not_visible_text', text: 'Item unavailable'},
                     ],
                   },
@@ -132,11 +137,18 @@ async function main() {
         scenario: 'happy_path',
       });
       const stabilitySteps = stabilityLoaded.flows[0].steps;
+      assert.equal(stabilitySteps[0].type, 'goto');
+      assert.equal(stabilitySteps[0].screenshot, true);
+      assert.equal(stabilitySteps[0].label, 'Item details direct entry');
+      assert.deepEqual(stabilitySteps[0].expectText, ['Item details']);
       assert.equal(stabilitySteps[1].type, 'reload');
       assert.equal(stabilitySteps[2].type, 'assert_stable_for');
       assert.deepEqual(stabilitySteps[2].expectText, ['Item details']);
       assert.deepEqual(stabilitySteps[2].expectNoText, ['Loading item']);
-      assert.equal(stabilitySteps[3].type, 'assert_not_visible_text');
+      assert.equal(stabilitySteps[3].type, 'assert');
+      assert.deepEqual(stabilitySteps[3].expectText, ['Item details']);
+      assert.deepEqual(stabilitySteps[3].expectNoText, ['Loading item']);
+      assert.equal(stabilitySteps[4].type, 'assert_not_visible_text');
 
       const artifacts = await writeArtifacts({
         outDir: '',

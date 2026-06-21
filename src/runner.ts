@@ -613,6 +613,10 @@ async function executeFlowStep(input: {
     return withExpectations(`Waited ${stepTimeout}ms.`);
   }
 
+  if (input.step.type === 'assert') {
+    return withExpectations('Assertions passed.');
+  }
+
   if (input.step.type === 'reload') {
     await input.page.reload({waitUntil: 'domcontentloaded', timeout: stepTimeout});
     await input.page

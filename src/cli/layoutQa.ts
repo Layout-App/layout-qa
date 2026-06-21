@@ -265,6 +265,11 @@ function openUrl(url: string) {
   });
 }
 
+function parseRemoteMode(value: string): CliOptions['mode'] {
+  if (/^(scripted|checks?|manifest|flow)$/i.test(value)) return 'scripted';
+  return 'exploratory';
+}
+
 function parseArgs(args: string[]): CliOptions {
   const firstCommand = args[0] && !args[0].startsWith('--') ? args[0] : 'help';
   const command =
@@ -333,12 +338,7 @@ function parseArgs(args: string[]): CliOptions {
         ? positional[0]
         : '') ||
       envValue('LAYOUT_RUN_ID'),
-    mode:
-      command === 'test'
-        ? 'exploratory'
-        : /^(scripted|checks?)$/i.test(readFlag(args, '--mode'))
-          ? 'scripted'
-          : 'exploratory',
+    mode: parseRemoteMode(readFlag(args, '--mode')),
     intent: readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
     workflowId:
       readFlag(args, '--workflow-id') ||
@@ -1772,11 +1772,8 @@ async function remoteRunCommand(options: CliOptions) {
       ref: options.branch,
       branch: options.branch,
       commitSha: options.commitSha || undefined,
-      mode: options.command === 'test' ? 'exploratory' : options.mode,
-      intent:
-        options.command === 'test' || options.mode === 'exploratory'
-          ? intent
-          : undefined,
+      mode: options.mode,
+      intent: intent || undefined,
       trigger: 'agent',
       workflowId: options.workflowId,
     },
@@ -1826,7 +1823,14 @@ async function remoteStatusCommand(options: CliOptions) {
     throw new Error(remoteRunSetupError(missing));
   }
 
-  const response = await getRemoteRun(options, options.runId);
+  let response = await getRemoteRun(options, options.runId);
+  if (options.wait) {
+    response = await waitForRemoteRun(options, options.runId, response);
+    const status = remoteRunStatus(response);
+    if (status !== 'passed' || remoteRunIssueCount(response) > 0) {
+      process.exitCode = 1;
+    }
+  }
 
   if (options.json) {
     process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);

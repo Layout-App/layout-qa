@@ -36,23 +36,52 @@ function stringArray(value: unknown) {
     : [];
 }
 
-function expectTextArray(value: unknown) {
-  if (!isRecord(value)) return [];
-  const text = value.text;
-  if (typeof text === 'string') return [text];
-  return stringArray(text);
+function textArray(value: unknown) {
+  if (typeof value === 'string') return [value];
+  return stringArray(value);
 }
 
-function expectNoTextArray(value: unknown) {
-  if (!isRecord(value)) return [];
-  const noText = value.noText;
-  if (typeof noText === 'string') return [noText];
-  if (Array.isArray(noText)) {
-    return noText.filter(item => typeof item === 'string');
+function expectTextArray(step: Record<string, unknown>) {
+  const values: string[] = [];
+  if (isRecord(step.expect)) {
+    const text = step.expect.text;
+    values.push(...textArray(text));
   }
-  const notText = value.notText;
-  if (typeof notText === 'string') return [notText];
-  return stringArray(notText);
+  values.push(...textArray(step.expectText));
+  return values;
+}
+
+function expectNoTextArray(step: Record<string, unknown>) {
+  const values: string[] = [];
+  if (isRecord(step.expect)) {
+    const noText = step.expect.noText;
+    values.push(...textArray(noText));
+    const notText = step.expect.notText;
+    values.push(...textArray(notText));
+  }
+  values.push(...textArray(step.expectNoText));
+  values.push(...textArray(step.noText));
+  values.push(...textArray(step.notText));
+  return values;
+}
+
+function screenshotLabel(value: unknown, index: number) {
+  if (typeof value === 'string') return value.trim();
+  if (value === true) return `Screenshot ${index + 1}`;
+  return '';
+}
+
+function screenshotRequested(value: unknown) {
+  return value === true || typeof value === 'string';
+}
+
+function hasExpectations(value: Record<string, unknown>) {
+  const expect = isRecord(value.expect) ? value.expect : {};
+  return (
+    expectTextArray(value).length > 0 ||
+    expectNoTextArray(value).length > 0 ||
+    expect.noConsoleErrors === true
+  );
 }
 
 function isLikelySelector(value: string) {
@@ -81,10 +110,7 @@ function shortcutStep(
   if (typeof value.screenshot === 'string' || value.screenshot === true) {
     return {
       type: 'screenshot',
-      label:
-        typeof value.screenshot === 'string'
-          ? value.screenshot.trim()
-          : `Screenshot ${index + 1}`,
+      label: screenshotLabel(value.screenshot, index),
       screenshot: true,
     };
   }
@@ -95,20 +121,24 @@ function shortcutStep(
 function normalizeFlowStep(value: unknown, index: number): QaFlowStep | null {
   if (!isRecord(value)) return null;
   const shortcut = shortcutStep(value, index);
-  const type = stringValue(value.type || shortcut?.type).trim();
+  const inferredType = hasExpectations(value) ? 'assert' : '';
+  const type = stringValue(value.type || shortcut?.type || inferredType).trim();
   if (!type) return null;
   const expect = isRecord(value.expect) ? value.expect : {};
   const clickTarget = stringValue(value.click).trim();
+  const label =
+    stringValue(value.label || value.name || shortcut?.label).trim() ||
+    screenshotLabel(value.screenshot, index);
 
   return {
     id:
       stringValue(value.id).trim() ||
       `${type.replace(/[^a-zA-Z0-9_-]+/g, '_')}_${index + 1}`,
     type: type === 'visit' ? 'goto' : type,
-    label: stringValue(value.label || value.name || shortcut?.label).trim(),
+    label,
     text: stringValue(value.text || shortcut?.text).trim(),
-    expectText: expectTextArray(value.expect),
-    expectNoText: expectNoTextArray(value.expect),
+    expectText: expectTextArray(value),
+    expectNoText: expectNoTextArray(value),
     expectNoConsoleErrors:
       isRecord(expect) && expect.noConsoleErrors === true ? true : undefined,
     selector:
@@ -120,7 +150,9 @@ function normalizeFlowStep(value: unknown, index: number): QaFlowStep | null {
     exact: booleanValue(value.exact),
     screenshot: booleanValue(
       value.screenshot,
-      type === 'screenshot' || shortcut?.screenshot === true
+      type === 'screenshot' ||
+        shortcut?.screenshot === true ||
+        screenshotRequested(value.screenshot)
     ),
     timeoutMs: numberValue(value.timeoutMs),
     tolerance: numberValue(value.tolerance),
