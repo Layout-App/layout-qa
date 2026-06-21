@@ -184,6 +184,7 @@ Options:
 --run-id <id>          Remote Layout run id for status checks.
 --mode <value>         scripted or ai. Defaults to ai for remote run.
 --intent <text>        Natural-language intent for AI testing remote runs.
+--flow <id>            Scripted manifest flow id/name to run. Repeat for multiple flows.
 --start-app            Start the app from .layout/qa.json before local checks.
 --serve-mocks          Start manifest services before local checks. Automatic with --start-app.
 --skip-install         With --start-app, skip app.install.

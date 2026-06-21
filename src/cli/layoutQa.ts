@@ -121,6 +121,7 @@ Options:
   --run-id <id>          Remote Layout run id for status checks.
   --mode <value>         scripted or ai. Defaults to ai for remote run.
   --intent <text>        Natural-language intent for AI testing remote runs.
+  --flow <id>            Scripted manifest flow id/name to run. Repeat for multiple flows.
   --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
   --wait                 Wait for a remote run to finish before printing the result.
   --start-app            Start the app from .layout/qa.json before local checks.
@@ -141,8 +142,26 @@ function hasFlag(args: string[], name: string) {
   return args.includes(name);
 }
 
+function readFlags(args: string[], name: string) {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === name && args[index + 1]) {
+      values.push(args[index + 1]);
+      index += 1;
+    }
+  }
+  return values;
+}
+
 function envValue(name: string) {
   return process.env[name] || '';
+}
+
+function envListValue(name: string) {
+  return envValue(name)
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
 }
 
 const VALUE_FLAGS = new Set([
@@ -164,6 +183,7 @@ const VALUE_FLAGS = new Set([
   '--run-id',
   '--mode',
   '--intent',
+  '--flow',
   '--workflow-id',
 ]);
 
@@ -286,6 +306,12 @@ function parseArgs(args: string[]): CliOptions {
   const parsedTimeoutMs = timeoutValue ? Number(timeoutValue) : undefined;
   const portValue = readFlag(args, '--port');
   const parsedPort = portValue ? Number(portValue) : undefined;
+  const requestedFlows = [
+    ...readFlags(args, '--flow'),
+    ...envListValue('LAYOUT_QA_FLOW'),
+    ...envListValue('LAYOUT_QA_FLOWS'),
+  ];
+  const requestedMode = readFlag(args, '--mode');
 
   if (
     timeoutValue &&
@@ -303,7 +329,8 @@ function parseArgs(args: string[]): CliOptions {
       command === 'test'
         ? readFlag(args, '--intent') || positional[0] || envValue('LAYOUT_INTENT')
         : readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
-    flowNames: command === 'check' ? positional : [],
+    flowNames:
+      command === 'check' ? [...positional, ...requestedFlows] : requestedFlows,
     app: readFlag(args, '--app') || envValue('LAYOUT_QA_APP'),
     targetUrl: readFlag(args, '--target-url'),
     scenario: readFlag(args, '--scenario') || 'happy_path',
@@ -338,7 +365,11 @@ function parseArgs(args: string[]): CliOptions {
         ? positional[0]
         : '') ||
       envValue('LAYOUT_RUN_ID'),
-    mode: parseRemoteMode(readFlag(args, '--mode')),
+    mode: requestedMode
+      ? parseRemoteMode(requestedMode)
+      : requestedFlows.length > 0
+        ? 'scripted'
+        : 'exploratory',
     intent: readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
     workflowId:
       readFlag(args, '--workflow-id') ||
@@ -1774,6 +1805,7 @@ async function remoteRunCommand(options: CliOptions) {
       commitSha: options.commitSha || undefined,
       mode: options.mode,
       intent: intent || undefined,
+      flows: options.flowNames.length ? options.flowNames : undefined,
       trigger: 'agent',
       workflowId: options.workflowId,
     },
