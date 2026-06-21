@@ -76,6 +76,7 @@ Usage:
   trylayout setup [options]
   trylayout init [options]
   trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
+  trylayout test script <flow_id...> --repo <owner/repo> --ref <branch> [options]
   trylayout status <run_id> [options]
   trylayout check [flow_id ...] [options]
   trylayout install-browsers
@@ -90,7 +91,8 @@ layout-qa is an equivalent package alias.
 Commands:
   setup                Check remote QA setup and show API key instructions.
   init                  Write a starter .layout/qa.json.
-  test                  Ask Layout to run AI browser QA remotely.
+  test                  Ask Layout to run remote browser QA.
+  test script           Run remote scripted manifest flow ids/names.
   status                Check a queued/running/completed remote run.
   check                 Run local/CI scripted manifest checks.
   install-browsers      Install Chromium for local/CI browser checks.
@@ -119,9 +121,7 @@ Options:
   --ref <name>           Branch/ref for a remote run. Defaults to --branch.
   --commit-sha <sha>     Commit SHA for remote run metadata.
   --run-id <id>          Remote Layout run id for status checks.
-  --mode <value>         scripted or ai. Defaults to ai for remote run.
   --intent <text>        Natural-language intent for AI testing remote runs.
-  --flow <id>            Scripted manifest flow id/name to run. Repeat for multiple flows.
   --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
   --wait                 Wait for a remote run to finish before printing the result.
   --start-app            Start the app from .layout/qa.json before local checks.
@@ -142,26 +142,8 @@ function hasFlag(args: string[], name: string) {
   return args.includes(name);
 }
 
-function readFlags(args: string[], name: string) {
-  const values: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === name && args[index + 1]) {
-      values.push(args[index + 1]);
-      index += 1;
-    }
-  }
-  return values;
-}
-
 function envValue(name: string) {
   return process.env[name] || '';
-}
-
-function envListValue(name: string) {
-  return envValue(name)
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
 }
 
 const VALUE_FLAGS = new Set([
@@ -285,33 +267,28 @@ function openUrl(url: string) {
   });
 }
 
-function parseRemoteMode(value: string): CliOptions['mode'] {
-  if (/^(scripted|checks?|manifest|flow)$/i.test(value)) return 'scripted';
-  return 'exploratory';
-}
-
 function parseArgs(args: string[]): CliOptions {
   const firstCommand = args[0] && !args[0].startsWith('--') ? args[0] : 'help';
   const command =
-    firstCommand === 'remote' && args[1] === 'run'
+    firstCommand === 'test' && args[1] === 'script'
+      ? 'test-script'
+      : firstCommand === 'remote' && args[1] === 'run'
       ? 'remote-run'
       : firstCommand === 'remote' && args[1] === 'status'
         ? 'remote-status'
         : firstCommand;
   const positional = positionalArgs(
     args,
-    command === 'remote-run' || command === 'remote-status' ? 2 : 1
+    command === 'test-script' ||
+      command === 'remote-run' ||
+      command === 'remote-status'
+      ? 2
+      : 1
   );
   const timeoutValue = readFlag(args, '--timeout');
   const parsedTimeoutMs = timeoutValue ? Number(timeoutValue) : undefined;
   const portValue = readFlag(args, '--port');
   const parsedPort = portValue ? Number(portValue) : undefined;
-  const requestedFlows = [
-    ...readFlags(args, '--flow'),
-    ...envListValue('LAYOUT_QA_FLOW'),
-    ...envListValue('LAYOUT_QA_FLOWS'),
-  ];
-  const requestedMode = readFlag(args, '--mode');
 
   if (
     timeoutValue &&
@@ -322,6 +299,16 @@ function parseArgs(args: string[]): CliOptions {
   if (portValue && (!Number.isInteger(parsedPort) || Number(parsedPort) <= 0)) {
     throw new Error('--port must be a positive integer.');
   }
+  if (hasFlag(args, '--mode')) {
+    throw new Error(
+      '--mode has been removed. Use trylayout test "intent" for AI testing, or trylayout test script <flow_id...> for manifest scripts.'
+    );
+  }
+  if (hasFlag(args, '--flow')) {
+    throw new Error(
+      '--flow has been removed. Use trylayout test script <flow_id...> instead.'
+    );
+  }
 
   return {
     command,
@@ -330,7 +317,7 @@ function parseArgs(args: string[]): CliOptions {
         ? readFlag(args, '--intent') || positional[0] || envValue('LAYOUT_INTENT')
         : readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
     flowNames:
-      command === 'check' ? [...positional, ...requestedFlows] : requestedFlows,
+      command === 'test-script' || command === 'check' ? positional : [],
     app: readFlag(args, '--app') || envValue('LAYOUT_QA_APP'),
     targetUrl: readFlag(args, '--target-url'),
     scenario: readFlag(args, '--scenario') || 'happy_path',
@@ -365,11 +352,7 @@ function parseArgs(args: string[]): CliOptions {
         ? positional[0]
         : '') ||
       envValue('LAYOUT_RUN_ID'),
-    mode: requestedMode
-      ? parseRemoteMode(requestedMode)
-      : requestedFlows.length > 0
-        ? 'scripted'
-        : 'exploratory',
+    mode: command === 'test-script' ? 'scripted' : 'exploratory',
     intent: readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
     workflowId:
       readFlag(args, '--workflow-id') ||
@@ -1775,14 +1758,23 @@ async function waitForRemoteRun(
 }
 
 async function remoteRunCommand(options: CliOptions) {
-  const intent =
-    options.command === 'test'
+  const isScripted = options.command === 'test-script';
+  const intent = isScripted
+    ? ''
+    : options.command === 'test'
       ? options.intentText.trim()
       : options.intentText.trim() || options.intent.trim();
   if (options.command === 'test' && !intent) {
     throw new Error(
       remoteRunSetupError([
         'an intent, e.g. npx @trylayout/qa test "test this branch"',
+      ])
+    );
+  }
+  if (isScripted && options.flowNames.length === 0) {
+    throw new Error(
+      remoteRunSetupError([
+        'one or more script ids, e.g. npx @trylayout/qa test script checkout',
       ])
     );
   }
@@ -1803,9 +1795,9 @@ async function remoteRunCommand(options: CliOptions) {
       ref: options.branch,
       branch: options.branch,
       commitSha: options.commitSha || undefined,
-      mode: options.mode,
+      mode: isScripted ? 'scripted' : 'exploratory',
       intent: intent || undefined,
-      flows: options.flowNames.length ? options.flowNames : undefined,
+      flows: isScripted ? options.flowNames : undefined,
       trigger: 'agent',
       workflowId: options.workflowId,
     },
@@ -1947,7 +1939,11 @@ async function main() {
     return;
   }
 
-  if (options.command === 'remote-run' || options.command === 'test') {
+  if (
+    options.command === 'remote-run' ||
+    options.command === 'test' ||
+    options.command === 'test-script'
+  ) {
     await remoteRunCommand(options);
     return;
   }
