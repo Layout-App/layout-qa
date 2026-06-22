@@ -1,6 +1,6 @@
 {
   "name": "@trylayout/qa",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Frontend QA API client and open protocol runner.",
   "license": "MIT",
   "author": "Layout",
@@ -21,6 +21,7 @@
     "ai-agents"
   ],
   "bin": {
+    "qa": "build/cli/layoutQa.js",
     "layout-qa": "build/cli/layoutQa.js",
     "trylayout": "build/cli/layoutQa.js"
   },
