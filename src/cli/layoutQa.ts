@@ -47,7 +47,7 @@ class HttpRequestError extends Error {
 }
 
 function printHelp() {
-  process.stdout.write(`Layout QA oracle CLI
+  process.stdout.write(`Layout frontend QA CLI
 
 Usage:
   trylayout setup [options]
@@ -58,7 +58,7 @@ Use npx @trylayout/qa <command> when running without installing.
 layout-qa is an equivalent package alias.
 
 Commands:
-  setup              Check API oracle setup and show API key instructions.
+  setup              Check API setup and show API key instructions.
   test               Ask Layout to inspect a branch and return a QA verdict.
   status             Check a queued/running/completed QA verdict.
 
@@ -498,7 +498,7 @@ async function waitForRemoteRun(
       const phase = String(run.phase || response.phase || 'queued');
       const message = String(run.phaseMessage || response.phaseMessage || '');
       process.stderr.write(
-        `Layout oracle ${remoteRunStatus(response)} · ${phase}${
+        `Layout QA ${remoteRunStatus(response)} · ${phase}${
           message ? ` · ${message}` : ''
         }\n`
       );
@@ -534,7 +534,7 @@ function remoteRunIssues(response: Record<string, unknown>) {
 }
 
 function setupError(missing: string[]) {
-  return [`Layout QA oracle needs ${missing.join(', ')}.`, `Docs: ${REMOTE_TEST_DOCS_URL}`].join('\n');
+  return [`Layout frontend QA needs ${missing.join(', ')}.`, `Docs: ${REMOTE_TEST_DOCS_URL}`].join('\n');
 }
 
 async function setupCommand(options: CliOptions) {
@@ -583,7 +583,7 @@ async function setupCommand(options: CliOptions) {
     return;
   }
 
-  process.stdout.write('Layout QA oracle setup\n\n');
+  process.stdout.write('Layout frontend QA setup\n\n');
   process.stdout.write(
     `${hasApiKey ? 'PASS' : 'TODO'} API key: ${
       hasApiKey ? 'found in --api-key/LAYOUT_API_KEY' : 'missing'
@@ -654,8 +654,8 @@ async function testCommand(options: CliOptions) {
 
   process.stdout.write(
     options.wait
-      ? `Layout QA oracle ${remoteRunStatus(response)}\n`
-      : 'Layout QA oracle queued\n'
+      ? `Layout QA ${remoteRunStatus(response)}\n`
+      : 'Layout QA queued\n'
   );
   process.stdout.write(`Run: ${runId}\n`);
   if (response.runUrl || response.reportUrl) {
@@ -706,7 +706,7 @@ async function statusCommand(options: CliOptions) {
   const phaseStatus = String(run.phaseStatus || response.phaseStatus || '');
   const phaseMessage = String(run.phaseMessage || response.phaseMessage || '');
   const issueCount = Number(run.issueCount || response.issueCount || 0);
-  process.stdout.write(`Layout QA oracle ${status}\n`);
+  process.stdout.write(`Layout QA ${status}\n`);
   process.stdout.write(`Run: ${String(response.runId || options.runId)}\n`);
   process.stdout.write(`Phase: ${phase}${phaseStatus ? ` (${phaseStatus})` : ''}\n`);
   if (phaseMessage) process.stdout.write(`Message: ${phaseMessage}\n`);

@@ -4,10 +4,9 @@
 [![CI](https://github.com/Layout-App/layout-qa/actions/workflows/ci.yml/badge.svg)](https://github.com/Layout-App/layout-qa/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-black.svg)](LICENSE)
 
-Layout QA is an API oracle for frontend reliability. Coding agents send Layout a
-GitHub repository, branch/ref, and natural-language QA intent. Layout does the
-simulation work remotely and returns a verdict with concrete issues when it can
-find them.
+Layout QA is frontend QA for coding agents. Send Layout a GitHub repository,
+branch/ref, and natural-language intent. Get back concrete UI, UX, and state
+issues your agent can fix.
 
 The package is intentionally small: it is an API client for agents, not a local
 test framework or report generator.
@@ -119,7 +118,7 @@ The response is optimized for coding agents:
 Earlier versions exposed local commands such as `check`, `run`, `init`,
 `mock-api`, and `install-browsers`. Those are no longer part of the primary CLI.
 Use Playwright, Vitest, or your app's own CI directly for local testing. Use
-Layout when an agent wants an independent QA oracle for a branch.
+Layout when an agent wants an independent frontend QA pass for a branch.
 
 ## Feedback
 

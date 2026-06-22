@@ -1,7 +1,7 @@
 {
   "name": "@trylayout/qa",
-  "version": "0.7.0",
-  "description": "API client for Layout's frontend QA oracle.",
+  "version": "0.7.1",
+  "description": "API client for Layout frontend QA.",
   "license": "MIT",
   "author": "Layout",
   "homepage": "https://github.com/Layout-App/layout-qa#readme",
