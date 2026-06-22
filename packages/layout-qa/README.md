@@ -2,17 +2,13 @@
 
 `layout-qa` is a convenience alias for the canonical package `@trylayout/qa`.
 
-Both commands are equivalent:
+Both package names expose the same open source frontend QA protocol:
 
 ```bash
-npx layout-qa setup --open
-npx @trylayout/qa setup --open
-npx layout-qa test "test checkout recovery" --repo owner/repo --ref feature-branch --api-key "$LAYOUT_API_KEY"
-npx @trylayout/qa test "test checkout recovery" --repo owner/repo --ref feature-branch --api-key "$LAYOUT_API_KEY"
-npx layout-qa status <run_id> --api-key "$LAYOUT_API_KEY" --json
-npx @trylayout/qa status <run_id> --api-key "$LAYOUT_API_KEY" --json
-npx layout-qa install-browsers
-npx @trylayout/qa install-browsers
+npx layout-qa setup
+npx @trylayout/qa setup
+npx layout-qa test "test checkout recovery" --json
+npx @trylayout/qa test "test checkout recovery" --json
 npx layout-qa check --target-url http://localhost:5173 --scenario happy_path --open
 npx @trylayout/qa check --target-url http://localhost:5173 --scenario happy_path --open
 npx layout-qa mock-api --scenario happy_path

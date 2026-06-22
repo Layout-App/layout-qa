@@ -33,8 +33,7 @@ import {
 import {formatViewport, parseViewport} from '../viewports';
 
 const requireFromHere = createRequire(__filename);
-const REMOTE_TEST_DOCS_URL = 'https://trylayout.com/docs/qa';
-const WEB_SETUP_URL = 'https://app.trylayout.com/qa/setup';
+const QA_DOCS_URL = 'https://trylayout.com/docs/qa';
 
 type CliOptions = {
   command: string;
@@ -74,8 +73,7 @@ function printHelp() {
 
 Usage:
   trylayout setup [options]
-  trylayout test "intent" --repo <owner/repo> --ref <branch> [options]
-  trylayout status <run_id> [options]
+  trylayout test "intent" [options]
 
 Open protocol commands:
   trylayout init [options]
@@ -88,9 +86,8 @@ Use npx @trylayout/qa <command> when running without installing.
 layout-qa is an equivalent package alias.
 
 Commands:
-  setup                Check API setup and show API key instructions.
-  test                 Ask Layout to inspect a branch and return a QA verdict.
-  status               Check a queued/running/completed QA verdict.
+  setup                Create or verify local Layout QA protocol files.
+  test                 Run local protocol checks for a QA intent.
   init                 Write a starter open protocol .layout/qa.json.
   check                Run local/CI scripted protocol checks.
   install-browsers     Install Chromium for local/CI browser checks.
@@ -108,22 +105,16 @@ Options:
   --viewport <value>     Viewport preset or size. Use desktop, tablet, mobile, or WIDTHxHEIGHT. Defaults to desktop.
   --timeout <ms>         Browser run timeout. Defaults to LAYOUT_QA_TEST_TIMEOUT_MS or 60000.
   --headed               Show the browser instead of running headless.
-  --open                 Open the web setup page or generated local HTML report.
+  --open                 Open generated local HTML reports. With setup, open docs.
   --json                 Print machine-readable JSON.
-  --api-url <url>        Layout API base URL. Defaults to https://api.trylayout.com/v1/qa.
-  --api-key <key>        Layout organization API key for API runs.
-  --repo <name>          Repository full name, e.g. owner/repo.
   --branch <name>        Branch name for report metadata.
-  --ref <name>           Branch/ref for an API run. Defaults to --branch.
   --commit-sha <sha>     Commit SHA metadata.
-  --run-id <id>          Layout run id for status checks.
-  --intent <text>        Natural-language QA intent for API runs.
+  --intent <text>        Natural-language QA intent metadata.
   --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
-  --wait                 Wait for an API run to finish before printing the result.
   --start-app            Start the app from .layout/qa.json before local checks.
   --serve-mocks          Start manifest services before local checks. Automatic with --start-app.
   --skip-install         With --start-app, skip app.install.
-  --force                Overwrite an existing flow file during init.
+  --force                Overwrite starter protocol files during setup/init.
   --help                 Show this help.
 `);
 }
@@ -283,7 +274,7 @@ function parseArgs(args: string[]): CliOptions {
   }
   if (hasFlag(args, '--mode')) {
     throw new Error(
-      '--mode has been removed. Use trylayout test "intent" for API QA, or trylayout check <flow_id...> for local protocol checks.'
+      '--mode has been removed. Use trylayout test "intent" for local protocol QA, or trylayout check <flow_id...> for explicit flow checks.'
     );
   }
   if (hasFlag(args, '--flow')) {
@@ -293,12 +284,12 @@ function parseArgs(args: string[]): CliOptions {
   }
   if (firstCommand === 'test' && args[1] === 'script') {
     throw new Error(
-      'Remote scripted API runs are not part of the primary CLI. Use trylayout check <flow_id...> locally, or trylayout test "intent" for API QA.'
+      'Script selection is handled by the local protocol. Use trylayout check <flow_id...>, or trylayout test "intent" for the default local QA pass.'
     );
   }
   if (firstCommand === 'remote') {
     throw new Error(
-      'The remote namespace has been removed. Use trylayout test "intent" or trylayout status <run_id>.'
+      'The remote namespace is not part of the open source protocol. Use trylayout test "intent" locally.'
     );
   }
 
@@ -920,6 +911,41 @@ async function startLocalCheckSession(input: {
   } satisfies LocalCheckSession;
 }
 
+async function writeStarterProtocol(input: {
+  options: CliOptions;
+  manifestPath: string;
+  silent?: boolean;
+}) {
+  await fs.mkdir(path.dirname(input.manifestPath), {recursive: true});
+  await fs.writeFile(
+    input.manifestPath,
+    `${JSON.stringify(starterFlowManifest(), null, 2)}\n`
+  );
+  const layoutDir = path.dirname(input.manifestPath);
+  const layoutGitignorePath = await ensureLayoutGitignore(layoutDir);
+  const mockRoot = path.resolve(
+    path.dirname(path.dirname(input.manifestPath)),
+    '.layout',
+    'api',
+    'scenarios'
+  );
+  await fs.mkdir(mockRoot, {recursive: true});
+  const scenarios = starterMockScenarios();
+  for (const [scenario, routes] of Object.entries(scenarios)) {
+    const scenarioPath = path.join(mockRoot, `${scenario}.json`);
+    if ((await exists(scenarioPath)) && !input.options.force) continue;
+    await fs.writeFile(scenarioPath, `${JSON.stringify(routes, null, 2)}\n`);
+  }
+  if (!input.silent) {
+    process.stdout.write(`Created ${input.manifestPath}\n`);
+    process.stdout.write(`Created starter mock service scenarios in ${mockRoot}\n`);
+    process.stdout.write(
+      `Updated ${layoutGitignorePath} to ignore generated Layout artifacts\n`
+    );
+  }
+  return {layoutGitignorePath, manifestPath: input.manifestPath, mockRoot};
+}
+
 async function initCommand(options: CliOptions) {
   const manifestPath = options.flowsPath
     ? path.resolve(process.cwd(), options.flowsPath)
@@ -931,31 +957,7 @@ async function initCommand(options: CliOptions) {
     );
   }
 
-  await fs.mkdir(path.dirname(manifestPath), {recursive: true});
-  await fs.writeFile(
-    manifestPath,
-    `${JSON.stringify(starterFlowManifest(), null, 2)}\n`
-  );
-  const layoutDir = path.dirname(manifestPath);
-  const layoutGitignorePath = await ensureLayoutGitignore(layoutDir);
-  const mockRoot = path.resolve(
-    path.dirname(path.dirname(manifestPath)),
-    '.layout',
-    'api',
-    'scenarios'
-  );
-  await fs.mkdir(mockRoot, {recursive: true});
-  const scenarios = starterMockScenarios();
-  for (const [scenario, routes] of Object.entries(scenarios)) {
-    const scenarioPath = path.join(mockRoot, `${scenario}.json`);
-    if ((await exists(scenarioPath)) && !options.force) continue;
-    await fs.writeFile(scenarioPath, `${JSON.stringify(routes, null, 2)}\n`);
-  }
-  process.stdout.write(`Created ${manifestPath}\n`);
-  process.stdout.write(`Created starter mock service scenarios in ${mockRoot}\n`);
-  process.stdout.write(
-    `Updated ${layoutGitignorePath} to ignore generated Layout artifacts\n`
-  );
+  await writeStarterProtocol({options, manifestPath});
 }
 
 async function setupCommand(options: CliOptions) {
@@ -963,42 +965,33 @@ async function setupCommand(options: CliOptions) {
     ? path.resolve(process.cwd(), options.flowsPath)
     : await resolveDefaultPath(FLOW_MANIFEST_PATH);
   const manifestExists = await exists(manifestPath);
-  const repository = options.repo || (await inferGitRepository());
-  const ref = options.branch || (await inferGitBranch());
-  const hasApiKey = Boolean(options.apiKey);
-  const ready = Boolean(hasApiKey && repository && ref);
-  const nextTestCommand = [
-    'trylayout test "test this branch"',
-    repository ? `--repo ${repository}` : '--repo owner/repo',
-    ref ? `--ref ${ref}` : '--ref branch',
-    '--wait',
-    '--json',
-  ].join(' ');
+  const shouldCreate = !manifestExists || options.force;
+  const nextTestCommand = 'trylayout test "test this branch" --json';
+  let created = false;
+
+  if (shouldCreate) {
+    await writeStarterProtocol({options, manifestPath, silent: options.json});
+    created = true;
+  }
+
   const setup = {
-    ready,
+    ready: true,
     checks: {
-      apiKey: hasApiKey,
-      repository: Boolean(repository),
-      ref: Boolean(ref),
-      optionalProtocolManifest: manifestExists,
+      protocolManifest: true,
     },
-    repository: repository || undefined,
-    ref: ref || undefined,
-    optionalProtocolManifestPath: manifestPath,
-    setupUrl: WEB_SETUP_URL,
-    docsUrl: REMOTE_TEST_DOCS_URL,
+    manifestPath,
+    created,
+    docsUrl: QA_DOCS_URL,
     nextCommands: {
-      setApiKey: 'export LAYOUT_API_KEY="lqa_key_..."',
       test: nextTestCommand,
-      status: 'trylayout status <run_id> --wait --json',
-      initProtocol: 'trylayout init',
+      installBrowsers: 'trylayout install-browsers',
     },
   };
 
   if (options.open) {
-    await openUrl(WEB_SETUP_URL).catch(error => {
+    await openUrl(QA_DOCS_URL).catch(error => {
       process.stderr.write(
-        `Could not open ${WEB_SETUP_URL}: ${
+        `Could not open ${QA_DOCS_URL}: ${
           error instanceof Error ? error.message : String(error)
         }\n`
       );
@@ -1007,45 +1000,29 @@ async function setupCommand(options: CliOptions) {
 
   if (options.json) {
     process.stdout.write(`${JSON.stringify(setup, null, 2)}\n`);
-    process.exitCode = ready ? 0 : 1;
+    process.exitCode = 0;
     return;
   }
 
-  process.stdout.write('Layout frontend QA setup\n\n');
+  process.stdout.write('Layout frontend QA protocol setup\n\n');
   process.stdout.write(
-    `${hasApiKey ? 'PASS' : 'TODO'} API key: ${
-      hasApiKey ? 'found in --api-key/LAYOUT_API_KEY' : 'missing'
-    }\n`
-  );
-  process.stdout.write(
-    `${repository ? 'PASS' : 'TODO'} Repository: ${repository || 'not detected'}\n`
-  );
-  process.stdout.write(`${ref ? 'PASS' : 'TODO'} Ref: ${ref || 'not detected'}\n`);
-  process.stdout.write(
-    `${manifestExists ? 'PASS' : 'OPTIONAL'} Open protocol manifest: ${
-      manifestExists ? manifestPath : `${manifestPath} not found`
-    }\n\n`
+    `${created ? 'Created' : 'Found'} protocol manifest: ${manifestPath}\n`
   );
 
-  if (!hasApiKey) {
-    process.stdout.write('Get an API key:\n');
-    process.stdout.write(`  ${WEB_SETUP_URL}\n\n`);
-    process.stdout.write('Then add it to your shell:\n');
-    process.stdout.write('  export LAYOUT_API_KEY="lqa_key_..."\n\n');
-  }
-  if (!manifestExists) {
-    process.stdout.write('Optional: create a starter open protocol manifest:\n');
-    process.stdout.write('  trylayout init\n\n');
-  }
-  if (!repository || !ref) {
-    process.stdout.write('If repo/ref were not detected, pass them explicitly:\n');
-    process.stdout.write('  --repo owner/repo --ref branch\n\n');
+  if (created) {
+    process.stdout.write(
+      'Review .layout/qa.json so the app command, QA env, and high-value flows match this repo.\n\n'
+    );
+  } else {
+    process.stdout.write(
+      'The repo already has Layout protocol files. Use --force only when you intentionally want to replace the starter manifest.\n\n'
+    );
   }
 
-  process.stdout.write(`Docs: ${REMOTE_TEST_DOCS_URL}\n\n`);
+  process.stdout.write(`Docs: ${QA_DOCS_URL}\n\n`);
   process.stdout.write('Next command:\n');
   process.stdout.write(`  ${nextTestCommand}\n`);
-  process.exitCode = ready ? 0 : 1;
+  process.exitCode = 0;
 }
 
 async function installBrowsersCommand(options: CliOptions) {
@@ -1653,6 +1630,25 @@ async function checkCommand(options: CliOptions) {
   }
 }
 
+async function testCommand(options: CliOptions) {
+  const manifestPath = options.flowsPath
+    ? path.resolve(process.cwd(), options.flowsPath)
+    : await resolveDefaultPath(FLOW_MANIFEST_PATH);
+  const manifestExists = await exists(manifestPath);
+
+  if (!manifestExists && !options.targetUrl) {
+    throw new Error(
+      `No Layout protocol manifest found at ${manifestPath}.\nRun trylayout setup, or pass --target-url for an already-running app.`
+    );
+  }
+
+  await checkCommand({
+    ...options,
+    startApp: options.startApp || !options.targetUrl,
+    serveMocks: options.serveMocks || options.startApp || !options.targetUrl,
+  });
+}
+
 function apiEndpoint(baseUrl: string, pathName: string) {
   return `${baseUrl.replace(/\/+$/, '')}/${pathName.replace(/^\/+/, '')}`;
 }
@@ -1664,7 +1660,7 @@ function sleep(ms: number) {
 function remoteRunSetupError(missing: string[]) {
   return [
     `Layout frontend QA needs ${missing.join(', ')}.`,
-    `Docs: ${REMOTE_TEST_DOCS_URL}`,
+    `Docs: ${QA_DOCS_URL}`,
   ].join('\n');
 }
 
@@ -1918,7 +1914,7 @@ async function main() {
   }
 
   if (options.command === 'test') {
-    await remoteRunCommand(options);
+    await testCommand(options);
     return;
   }
 

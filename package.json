@@ -1,7 +1,7 @@
 {
   "name": "@trylayout/qa",
-  "version": "0.7.3",
-  "description": "Frontend QA API client and open protocol runner.",
+  "version": "0.7.4",
+  "description": "Open source frontend QA protocol runner for coding agents.",
   "license": "MIT",
   "author": "Layout",
   "homepage": "https://github.com/Layout-App/layout-qa#readme",
