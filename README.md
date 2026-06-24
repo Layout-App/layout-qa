@@ -44,6 +44,14 @@ trylayout setup [options]
 trylayout test "intent" [options]
 ```
 
+Remote PR check commands:
+
+```text
+trylayout pr setup [options]
+trylayout pr run "intent" --repo <owner/repo> --ref <branch> [options]
+trylayout pr status <run_id> [options]
+```
+
 Protocol commands:
 
 ```text
@@ -66,6 +74,17 @@ Use `npx @trylayout/qa <command>` when running without installing. The
 --timeout <ms>     Browser run timeout.
 --branch <name>    Branch name for report metadata.
 --commit-sha <sha> Commit SHA metadata.
+```
+
+Remote PR options:
+
+```text
+--api-url <url>    Layout API base URL. Defaults to https://api.trylayout.com/v1/qa.
+--api-key <key>    Layout organization API key. Defaults to LAYOUT_API_KEY.
+--repo <name>      Repository full name, e.g. owner/repo.
+--ref <name>       Branch/ref for a PR check. Defaults to --branch.
+--run-id <id>      Layout run id for status checks.
+--wait             Poll until the PR check is ready.
 ```
 
 Protocol/local options:
@@ -136,6 +155,32 @@ If the app is already running, skip the manifest start command:
 ```bash
 npx @trylayout/qa test "check the current page" \
   --target-url http://localhost:5173 \
+  --json
+```
+
+## Remote PR Checks
+
+The hosted product is a GitHub PR check, not a dashboard workflow. GitHub is the
+system of record; the Layout dashboard is only for inspecting screenshots, logs,
+and run details when a compact PR check is not enough.
+
+Generate a GitHub Actions workflow:
+
+```bash
+npx @trylayout/qa pr setup
+```
+
+Add `LAYOUT_API_KEY` as a GitHub repository secret, then open a pull request.
+The generated workflow calls Layout remotely and fails the GitHub check when
+Layout finds issues or cannot complete the run.
+
+Run the same remote check manually:
+
+```bash
+npx @trylayout/qa pr run "test this pull request" \
+  --repo owner/repo \
+  --ref feature-branch \
+  --wait \
   --json
 ```
 

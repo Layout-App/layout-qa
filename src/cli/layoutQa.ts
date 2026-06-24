@@ -75,6 +75,11 @@ Usage:
   trylayout setup [options]
   trylayout test "intent" [options]
 
+PR check commands:
+  trylayout pr setup [options]
+  trylayout pr run "intent" --repo <owner/repo> --ref <branch> [options]
+  trylayout pr status <run_id> [options]
+
 Open protocol commands:
   trylayout init [options]
   trylayout check [flow_id ...] [options]
@@ -88,6 +93,9 @@ layout-qa is an equivalent package alias.
 Commands:
   setup                Create or verify local Layout QA protocol files.
   test                 Run local protocol checks for a QA intent.
+  pr setup             Write a GitHub Actions workflow for remote PR checks.
+  pr run               Ask Layout to run remote QA for a PR branch.
+  pr status            Check a queued/running/completed remote PR check.
   init                 Write a starter open protocol .layout/qa.json.
   check                Run local/CI scripted protocol checks.
   install-browsers     Install Chromium for local/CI browser checks.
@@ -111,6 +119,12 @@ Options:
   --commit-sha <sha>     Commit SHA metadata.
   --intent <text>        Natural-language QA intent metadata.
   --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
+  --api-url <url>        Layout API base URL for PR checks.
+  --api-key <key>        Layout organization API key for PR checks.
+  --repo <name>          Repository full name for PR checks, e.g. owner/repo.
+  --ref <name>           Branch/ref for PR checks. Defaults to --branch.
+  --run-id <id>          Layout run id for PR status checks.
+  --wait                 Wait for a remote PR check to finish.
   --start-app            Start the app from .layout/qa.json before local checks.
   --serve-mocks          Start manifest services before local checks. Automatic with --start-app.
   --skip-install         With --start-app, skip app.install.
@@ -256,8 +270,17 @@ function openUrl(url: string) {
 
 function parseArgs(args: string[]): CliOptions {
   const firstCommand = args[0] && !args[0].startsWith('--') ? args[0] : 'help';
-  const command = firstCommand;
-  const positional = positionalArgs(args, 1);
+  const subCommand =
+    firstCommand === 'pr' && args[1] && !args[1].startsWith('--')
+      ? args[1]
+      : '';
+  const command =
+    firstCommand === 'pr'
+      ? subCommand
+        ? `pr:${subCommand}`
+        : 'pr:help'
+      : firstCommand;
+  const positional = positionalArgs(args, firstCommand === 'pr' ? 2 : 1);
   const timeoutValue = readFlag(args, '--timeout');
   const parsedTimeoutMs = timeoutValue ? Number(timeoutValue) : undefined;
   const portValue = readFlag(args, '--port');
@@ -296,7 +319,7 @@ function parseArgs(args: string[]): CliOptions {
   return {
     command,
     intentText:
-      command === 'test'
+      command === 'test' || command === 'pr:run'
         ? readFlag(args, '--intent') || positional[0] || envValue('LAYOUT_INTENT')
         : readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
     flowNames: command === 'check' ? positional : [],
@@ -330,7 +353,7 @@ function parseArgs(args: string[]): CliOptions {
       envValue('GITHUB_SHA'),
     runId:
       readFlag(args, '--run-id') ||
-      (command === 'status' ? positional[0] : '') ||
+      (command === 'status' || command === 'pr:status' ? positional[0] : '') ||
       envValue('LAYOUT_RUN_ID'),
     mode: 'exploratory',
     intent: readFlag(args, '--intent') || envValue('LAYOUT_INTENT'),
@@ -348,7 +371,7 @@ function parseArgs(args: string[]): CliOptions {
     json: hasFlag(args, '--json'),
     open: hasFlag(args, '--open'),
     force: hasFlag(args, '--force'),
-    help: hasFlag(args, '--help') || command === 'help',
+    help: hasFlag(args, '--help') || command === 'help' || command === 'pr:help',
   };
 }
 
@@ -1023,6 +1046,140 @@ async function setupCommand(options: CliOptions) {
   process.stdout.write('Next command:\n');
   process.stdout.write(`  ${nextTestCommand}\n`);
   process.exitCode = 0;
+}
+
+function packageVersion() {
+  const pkg = requireFromHere('../../package.json') as {version?: string};
+  return pkg.version || 'latest';
+}
+
+function prWorkflowContent(input: {packageVersion: string}) {
+  return `# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Layout PR Check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: layout-pr-check-\${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  layout-pr-check:
+    runs-on: ubuntu-latest
+    env:
+      LAYOUT_API_KEY: \${{ secrets.LAYOUT_API_KEY }}
+      LAYOUT_QA_VERSION: ${input.packageVersion}
+      LAYOUT_INTENT: test this pull request
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate Layout credentials
+        run: |
+          if [ -z "$LAYOUT_API_KEY" ]; then
+            {
+              echo "### Layout PR check failed to start"
+              echo
+              echo "Set the repository secret \`LAYOUT_API_KEY\` to a Layout organization API key."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Run Layout remote PR check
+        env:
+          LAYOUT_REPOSITORY: \${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          LAYOUT_REF: \${{ github.event.pull_request.head.ref || github.ref_name }}
+          LAYOUT_COMMIT_SHA: \${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set +e
+          npx --yes "@trylayout/qa@$LAYOUT_QA_VERSION" pr run "$LAYOUT_INTENT" \\
+            --repo "$LAYOUT_REPOSITORY" \\
+            --ref "$LAYOUT_REF" \\
+            --commit-sha "$LAYOUT_COMMIT_SHA" \\
+            --wait \\
+            --json > /tmp/layout-pr-check.json 2>&1
+          status=$?
+          cat /tmp/layout-pr-check.json
+
+          {
+            if [ "$status" -eq 0 ]; then
+              echo "### Layout PR check passed"
+            else
+              echo "### Layout PR check found issues or failed"
+            fi
+            echo
+            echo '~~~json'
+            tail -c 6000 /tmp/layout-pr-check.json
+            echo
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$status"
+`;
+}
+
+async function prSetupCommand(options: CliOptions) {
+  const workflowPath = path.resolve(
+    process.cwd(),
+    '.github',
+    'workflows',
+    'layout-pr-check.yml'
+  );
+  if ((await exists(workflowPath)) && !options.force) {
+    throw new Error(
+      `${workflowPath} already exists. Use --force to overwrite it.`
+    );
+  }
+
+  await fs.mkdir(path.dirname(workflowPath), {recursive: true});
+  await fs.writeFile(
+    workflowPath,
+    prWorkflowContent({packageVersion: packageVersion()})
+  );
+
+  const result = {
+    status: 'created',
+    workflowPath,
+    secretName: 'LAYOUT_API_KEY',
+    docsUrl: QA_DOCS_URL,
+    nextSteps: [
+      'Add LAYOUT_API_KEY as a GitHub repository secret.',
+      'Open a pull request to run the Layout PR check.',
+      'Use the GitHub check summary as the main workflow surface; open the Layout run link only when deeper inspection is needed.',
+    ],
+  };
+
+  if (options.open) {
+    await openUrl(QA_DOCS_URL).catch(error => {
+      process.stderr.write(
+        `Could not open ${QA_DOCS_URL}: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`
+      );
+    });
+  }
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  process.stdout.write('Layout remote PR check setup\n\n');
+  process.stdout.write(`Created workflow: ${workflowPath}\n\n`);
+  process.stdout.write('Next steps:\n');
+  for (const step of result.nextSteps) {
+    process.stdout.write(`- ${step}\n`);
+  }
+  process.stdout.write(`\nDocs: ${QA_DOCS_URL}\n`);
 }
 
 async function installBrowsersCommand(options: CliOptions) {
@@ -1747,10 +1904,10 @@ async function waitForRemoteRun(
 
 async function remoteRunCommand(options: CliOptions) {
   const intent = options.intentText.trim() || options.intent.trim();
-  if (options.command === 'test' && !intent) {
+  if (!intent) {
     throw new Error(
       remoteRunSetupError([
-        'an intent, e.g. npx @trylayout/qa test "test this branch"',
+        'an intent, e.g. npx @trylayout/qa pr run "test this pull request"',
       ])
     );
   }
@@ -1772,7 +1929,7 @@ async function remoteRunCommand(options: CliOptions) {
       commitSha: options.commitSha || undefined,
       mode: 'exploratory',
       intent: intent || undefined,
-      trigger: 'agent',
+      trigger: options.command === 'pr:run' ? 'pull_request' : 'agent',
       workflowId: options.workflowId,
     },
   });
@@ -1792,16 +1949,16 @@ async function remoteRunCommand(options: CliOptions) {
     return;
   }
 
-  process.stdout.write(
-    options.wait
-      ? `Layout QA ${remoteRunStatus(response)}\n`
-      : 'Layout QA queued\n'
-  );
-  process.stdout.write(`Run: ${runId}\n`);
-  if (response.runUrl || response.reportUrl) {
-    process.stdout.write(
-      `Report: ${String(response.runUrl || response.reportUrl)}\n`
-    );
+  if (options.wait) {
+    printRemoteRunSummary({response, runId});
+  } else {
+    process.stdout.write('Layout PR check queued\n');
+    process.stdout.write(`Run: ${runId}\n`);
+    if (response.runUrl || response.reportUrl) {
+      process.stdout.write(
+        `Run detail: ${String(response.runUrl || response.reportUrl)}\n`
+      );
+    }
   }
 }
 
@@ -1811,6 +1968,53 @@ function remoteRunIssues(response: Record<string, unknown>) {
     ? response.issues
     : (run as {issues?: unknown}).issues);
   return Array.isArray(issues) ? issues : [];
+}
+
+function printRemoteRunSummary(input: {
+  response: Record<string, unknown>;
+  runId: string;
+}) {
+  const run = remoteRunRecord(input.response);
+  const status = remoteRunStatus(input.response);
+  const phase = String(run.phase || input.response.phase || '');
+  const phaseStatus = String(run.phaseStatus || input.response.phaseStatus || '');
+  const phaseMessage = String(run.phaseMessage || input.response.phaseMessage || '');
+  const screenCount = Number(run.screenCount || input.response.screenCount || 0);
+  const issueCount = Number(run.issueCount || input.response.issueCount || 0);
+  process.stdout.write(`Layout PR check ${status}\n`);
+  process.stdout.write(`Run: ${String(input.response.runId || input.runId)}\n`);
+  if (phase) {
+    process.stdout.write(
+      `Phase: ${phase}${phaseStatus ? ` (${phaseStatus})` : ''}\n`
+    );
+  }
+  if (phaseMessage) {
+    process.stdout.write(`Message: ${phaseMessage}\n`);
+  }
+  process.stdout.write(`Screens: ${screenCount}\n`);
+  process.stdout.write(`Issues: ${issueCount}\n`);
+  if (input.response.runUrl || input.response.reportUrl) {
+    process.stdout.write(
+      `Run detail: ${String(input.response.runUrl || input.response.reportUrl)}\n`
+    );
+  }
+
+  const issues = remoteRunIssues(input.response).slice(0, 5);
+  if (issues.length) {
+    process.stdout.write('Top issues:\n');
+    for (const issue of issues) {
+      const item = issue as {
+        severity?: unknown;
+        type?: unknown;
+        message?: unknown;
+      };
+      process.stdout.write(
+        `- ${String(item.severity || 'issue')} ${String(
+          item.type || 'unknown'
+        )}: ${String(item.message || '')}\n`
+      );
+    }
+  }
 }
 
 async function remoteStatusCommand(options: CliOptions) {
@@ -1835,45 +2039,7 @@ async function remoteStatusCommand(options: CliOptions) {
     return;
   }
 
-  const run = remoteRunRecord(response);
-  const status = remoteRunStatus(response);
-  const phase = String(run.phase || response.phase || 'unknown');
-  const phaseStatus = String(run.phaseStatus || response.phaseStatus || '');
-  const phaseMessage = String(run.phaseMessage || response.phaseMessage || '');
-  const screenCount = Number(run.screenCount || response.screenCount || 0);
-  const issueCount = Number(run.issueCount || response.issueCount || 0);
-  process.stdout.write(`Layout QA ${status}\n`);
-  process.stdout.write(`Run: ${String(response.runId || options.runId)}\n`);
-  process.stdout.write(
-    `Phase: ${phase}${phaseStatus ? ` (${phaseStatus})` : ''}\n`
-  );
-  if (phaseMessage) {
-    process.stdout.write(`Message: ${phaseMessage}\n`);
-  }
-  process.stdout.write(`Screens: ${screenCount}\n`);
-  process.stdout.write(`Issues: ${issueCount}\n`);
-  if (response.runUrl || response.reportUrl) {
-    process.stdout.write(
-      `Report: ${String(response.runUrl || response.reportUrl)}\n`
-    );
-  }
-
-  const issues = remoteRunIssues(response).slice(0, 5);
-  if (issues.length) {
-    process.stdout.write('Top issues:\n');
-    for (const issue of issues) {
-      const item = issue as {
-        severity?: unknown;
-        type?: unknown;
-        message?: unknown;
-      };
-      process.stdout.write(
-        `- ${String(item.severity || 'issue')} ${String(
-          item.type || 'unknown'
-        )}: ${String(item.message || '')}\n`
-      );
-    }
-  }
+  printRemoteRunSummary({response, runId: options.runId});
 }
 
 async function main() {
@@ -1890,6 +2056,21 @@ async function main() {
 
   if (options.command === 'setup') {
     await setupCommand(options);
+    return;
+  }
+
+  if (options.command === 'pr:setup') {
+    await prSetupCommand(options);
+    return;
+  }
+
+  if (options.command === 'pr:run') {
+    await remoteRunCommand(options);
+    return;
+  }
+
+  if (options.command === 'pr:status') {
+    await remoteStatusCommand(options);
     return;
   }
 

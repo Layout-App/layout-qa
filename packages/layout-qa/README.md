@@ -9,6 +9,10 @@ npx layout-qa setup
 npx @trylayout/qa setup
 npx layout-qa test "test checkout recovery" --json
 npx @trylayout/qa test "test checkout recovery" --json
+npx layout-qa pr setup
+npx @trylayout/qa pr setup
+npx layout-qa pr run "test this pull request" --repo owner/repo --ref feature-branch --wait --json
+npx @trylayout/qa pr run "test this pull request" --repo owner/repo --ref feature-branch --wait --json
 npx layout-qa check --target-url http://localhost:5173 --scenario happy_path --open
 npx @trylayout/qa check --target-url http://localhost:5173 --scenario happy_path --open
 npx layout-qa mock-api --scenario happy_path
