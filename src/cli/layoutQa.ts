@@ -118,7 +118,7 @@ Options:
   --branch <name>        Branch name for report metadata.
   --commit-sha <sha>     Commit SHA metadata.
   --intent <text>        Natural-language QA intent metadata.
-  --workflow-id <file>   Workflow id metadata. Defaults to layout-verify.yml.
+  --workflow-id <file>   Workflow id metadata. Defaults to layout-pr-check.yml.
   --api-url <url>        Layout API base URL for PR checks.
   --api-key <key>        Layout organization API key for PR checks.
   --repo <name>          Repository full name for PR checks, e.g. owner/repo.
@@ -360,7 +360,7 @@ function parseArgs(args: string[]): CliOptions {
     workflowId:
       readFlag(args, '--workflow-id') ||
       envValue('LAYOUT_WORKFLOW_ID') ||
-      'layout-verify.yml',
+      'layout-pr-check.yml',
     viewport: parseViewport(readFlag(args, '--viewport')),
     timeoutMs: parsedTimeoutMs,
     headed: hasFlag(args, '--headed'),

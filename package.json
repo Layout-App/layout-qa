@@ -1,6 +1,6 @@
 {
   "name": "@trylayout/qa",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "Open source frontend QA protocol runner for coding agents.",
   "license": "MIT",
   "author": "Layout",
